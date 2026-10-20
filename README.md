@@ -1,4 +1,4 @@
-# BrawlBuilder
+# BrawlBuilderEx
 The Ultimate Super Smash Bros Brawl ISO Builder
 
 ## About
