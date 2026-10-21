@@ -264,12 +264,15 @@ namespace BrawlBuilder.EX
                 // too big: plan the least destructive steps (vanilla movies to 10-frame placeholders, Subspace, trophy models) and ask first
                 string md = Path.Combine(files, "movie"), fd = Path.Combine(files, "toy", "fig");
                 var movies = Directory.Exists(md) ? Directory.GetFiles(md, "*.thp").Where(f => new FileInfo(f).Length >= 2000000).OrderByDescending(f => new FileInfo(f).Length).ToList() : new List<string>();
-                var figs = Directory.Exists(fd) ? Directory.GetFiles(fd).ToList() : new List<string>();
+                // trophy models only (not the pedestal Stand*.brres, name lists or data): each becomes a copy of the smallest one, so the
+                // Trophy Gallery still works (every trophy shows that model) - emptied models crash it
+                var figs = Directory.Exists(fd) ? Directory.GetFiles(fd, "*.brres").Where(f => !Path.GetFileName(f).StartsWith("Stand", StringComparison.OrdinalIgnoreCase)).ToList() : new List<string>();
+                var stub = figs.Count > 0 ? File.ReadAllBytes(figs.OrderBy(f => new FileInfo(f).Length).First()) : null;
                 long Sz(IEnumerable<string> l) => l.Sum(f => new FileInfo(f).Length);
                 var steps = new List<string>(); long est = total;
                 if (est > DiscMax && movies.Count > 0) { est -= Sz(movies); steps.Add("shorten vanilla movies (intro, endings, ...) to 10-frame clips"); }
                 if (est > DiscMax && sse.Count > 0) { est -= Sz(sse); steps.Add("remove Subspace Emissary"); }
-                if (est > DiscMax && figs.Count > 0) { est -= Sz(figs); steps.Add("empty the trophy models (the Vault's trophy viewer will not work)"); }
+                if (est > DiscMax && figs.Count > 0) { est -= Sz(figs) - (long)figs.Count * stub.Length; steps.Add("replace the trophy models with one small model (every trophy in the Vault looks the same)"); }
                 Bin.Require(est <= DiscMax, string.Format("the image would be {0:F2} GB, more than a dual-layer Wii disc holds ({1:F2} GB), even after shortening movies, removing Subspace and trophies.", total / 1e9, DiscMax / 1e9));
                 string msg = string.Format("This mod makes a {0:F2} GB image; a dual-layer Wii disc holds {1:F2} GB. To fit, BrawlBuilderEX has to:\n\n- {2}\n\nContinue?", total / 1e9, DiscMax / 1e9, string.Join("\n- ", steps));
                 Bin.Require(ConfirmFit != null ? ConfirmFit(msg) : Fit, ConfirmFit != null ? "cancelled: the image does not fit a dual-layer disc" : msg.Replace("Continue?", "Run again with --fit to allow this."));
@@ -283,8 +286,8 @@ namespace BrawlBuilder.EX
                 if (total > DiscMax && sse.Count > 0) { total -= Sz(sse); removeSse(); }
                 if (total > DiscMax && figs.Count > 0)
                 {
-                    foreach (var f in figs) { total -= new FileInfo(f).Length; Put(f, new byte[0]); }
-                    Report.Add("fit: " + figs.Count + " trophy models emptied (the Vault's trophy viewer will not work)");
+                    foreach (var f in figs) { long len = new FileInfo(f).Length; if (len <= stub.Length) continue; total -= len - stub.Length; Put(f, stub); }
+                    Report.Add("fit: " + figs.Count + " trophy models replaced by one small model (every trophy in the Vault looks the same)");
                 }
             }
             Log(string.Format("disc space: {0:F2} GB of unused vanilla data emptied, image {1:F2} GB", freed / 1e9, total / 1e9));
