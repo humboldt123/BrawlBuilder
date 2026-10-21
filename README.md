@@ -1,7 +1,5 @@
 <p align="center"><img src="logo.png" alt="BrawlBuilderEx"></p>
 
-The Ultimate Super Smash Bros Brawl ISO Builder
-
 ## About
 This is a tool to build modded SSBB ISOs. It currently works with many Brawl mods, although there are some issues. All versions of Project M should run fine, including 3.6 and above, with full support for sfx .sawnd files and alternate stages. Most Project M mods should work as well. Psycho Ghost's 3.6 build has been tested and seems to work fine. Legacy M, however, does not work at this time (with a regular build; Legacy MX works as an EX build).
 
