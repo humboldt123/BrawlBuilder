@@ -21,6 +21,9 @@ namespace BrawlBuilder.EX
         {
             ("open", 0x803EBEB8, 0x9421FFF0), ("read", 0x803EBEE4, 0x4BFFF7FC), ("seek", 0x803EBEE8, 0x9421FFF0),
             ("close", 0x803EBE8C, 0x9421FFF0), ("stat", 0x803EBF6C, 0x9421FFF0),
+            // the prfile2 functions under them (same arguments; FAF* only normalize the result) - P+Ex's THP streamer calls pf2_fread directly
+            ("open", 0x803EB644, 0x9421FFD0), ("read", 0x803EB6E0, 0x9421FFF0), ("seek", 0x803EB708, 0x9421FFF0),
+            ("close", 0x803EB620, 0x9421FFF0), ("stat", 0x803EB7C4, 0x9421FFE0),
         };
         // file slot: +0 used, +4 position, +8 -> fake FA file object whose +0x264 is the size (RSBE reads the size that way), +0xC size,
         // +0x10 offset in its pack, +0x14 -> the pack's DVDFileInfo
