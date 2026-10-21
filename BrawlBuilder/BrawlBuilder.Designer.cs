@@ -256,7 +256,7 @@
 			this.removeSubspace.Name = "removeSubspace";
 			this.removeSubspace.Size = new System.Drawing.Size(296, 17);
 			this.removeSubspace.TabIndex = 11;
-			this.removeSubspace.Text = "Remove Subspace Emissary (greatly reduces output size)";
+			this.removeSubspace.Text = "Delete Subspace Emissary (greatly reduces output size)";
 			this.removeSubspace.UseVisualStyleBackColor = true;
 			// 
 			// bannerBrowse

@@ -37,7 +37,10 @@ namespace BrawlBuilder.EX
         public bool Bake = true;                                          // install unconditional writes / C2 hooks into main.dol (off: all at runtime, for diagnosis)
         public bool RemoveSubspace;                                       // delete the Subspace Emissary files
         public bool Fit;                                                  // allow shortening movies / removing Subspace / trophies to fit (CLI --fit)
-        public Func<string, bool> ConfirmFit;                             // GUI: ask before doing that (overrides Fit)
+        public enum FitAnswer { Yes, YesAlways, No }
+        public Func<string, FitAnswer> AskFit;                           // GUI: asked before each lossy step (overrides Fit)
+        public bool FitNoAsk;                                             // "everything's okay": do the needed steps without asking
+        public List<string> Removed = new List<string>();                 // what the lossy steps took out, for the end-of-build summary
         public string SubspaceList;                                       // Resources/SubspaceEmissaryFiles.txt
 
         public void Run(string tree, ExMod m, string gameId)
@@ -258,11 +261,12 @@ namespace BrawlBuilder.EX
                 ? File.ReadLines(SubspaceList).Select(l => l.Trim()).Where(l => l.Length > 0).Select(l => Path.Combine(files, l.Replace((char)92, Path.DirectorySeparatorChar))).Where(File.Exists).ToList()
                 : new List<string>();
             Action removeSse = () => { foreach (var f in sse) File.Delete(f); Report.Add("Subspace Emissary removed (" + sse.Count + " files)"); sse.Clear(); };
-            if (RemoveSubspace && sse.Count > 0) removeSse();
+            if (RemoveSubspace && sse.Count > 0) { removeSse(); Removed.Add("Subspace Emissary (you chose to remove it)"); }
             long total = Directory.EnumerateFiles(tree, "*", SearchOption.AllDirectories).Sum(f => new FileInfo(f).Length);
             if (total > DiscMax)
             {
-                // too big: plan the least destructive steps (vanilla movies to 10-frame placeholders, Subspace, trophy models) and ask first
+                // too big: the least destructive steps first (vanilla movies to 10-frame placeholders, Subspace, trophy models),
+                // each only while still needed, each asked for unless the user said everything's okay (or --fit on the command line)
                 string md = Path.Combine(files, "movie"), fd = Path.Combine(files, "toy", "fig");
                 var movies = Directory.Exists(md) ? Directory.GetFiles(md, "*.thp").Where(f => new FileInfo(f).Length >= 2000000).OrderByDescending(f => new FileInfo(f).Length).ToList() : new List<string>();
                 // trophy models only (not the pedestal Stand*.brres, name lists or data): each becomes a copy of the smallest one, so the
@@ -270,25 +274,39 @@ namespace BrawlBuilder.EX
                 var figs = Directory.Exists(fd) ? Directory.GetFiles(fd, "*.brres").Where(f => !Path.GetFileName(f).StartsWith("Stand", StringComparison.OrdinalIgnoreCase)).ToList() : new List<string>();
                 var stub = figs.Count > 0 ? File.ReadAllBytes(figs.OrderBy(f => new FileInfo(f).Length).First()) : null;
                 long Sz(IEnumerable<string> l) => l.Sum(f => new FileInfo(f).Length);
-                var steps = new List<string>(); long est = total;
-                if (est > DiscMax && movies.Count > 0) { est -= Sz(movies); steps.Add("shorten vanilla movies (intro, endings, ...) to 10-frame clips"); }
-                if (est > DiscMax && sse.Count > 0) { est -= Sz(sse); steps.Add("remove Subspace Emissary"); }
-                if (est > DiscMax && figs.Count > 0) { est -= Sz(figs) - (long)figs.Count * stub.Length; steps.Add("replace the trophy models with one small model (every trophy in the Vault looks the same)"); }
-                Bin.Require(est <= DiscMax, string.Format("the image would be {0:F2} GB, more than a dual-layer Wii disc holds ({1:F2} GB), even after shortening movies, removing Subspace and trophies.", total / 1e9, DiscMax / 1e9));
-                string msg = string.Format("This mod makes a {0:F2} GB image; a dual-layer Wii disc holds {1:F2} GB. To fit, BrawlBuilderEX has to:\n\n- {2}\n\nContinue?", total / 1e9, DiscMax / 1e9, string.Join("\n- ", steps));
-                Bin.Require(ConfirmFit != null ? ConfirmFit(msg) : Fit, ConfirmFit != null ? "cancelled: the image does not fit a dual-layer disc" : msg.Replace("Continue?", "Run again with --fit to allow this."));
-                int n = 0;
-                foreach (var f in movies)
+                long most = total - Sz(movies) - Sz(sse) - (figs.Count > 0 ? Sz(figs) - (long)figs.Count * stub.Length : 0);
+                Bin.Require(most <= DiscMax, string.Format("the image would be {0:F2} GB, more than a dual-layer Wii disc holds ({1:F2} GB), even after shortening movies, removing Subspace and trophies.", total / 1e9, DiscMax / 1e9));
+                void Ask(string what)
                 {
-                    if (total <= DiscMax) break;
-                    long len = new FileInfo(f).Length; var t = Thp.Truncate(File.ReadAllBytes(f), 10); Put(f, t); total -= len - t.Length; n++;
+                    if (FitNoAsk) return;
+                    string msg = string.Format("This mod makes a {0:F2} GB image; a dual-layer Wii disc holds {1:F2} GB.\n\nTo fit, BrawlBuilderEX needs to {2}.", total / 1e9, DiscMax / 1e9, what);
+                    if (AskFit == null) { Bin.Require(Fit, msg + " Run again with --fit to allow this."); return; }
+                    var a = AskFit(msg);
+                    Bin.Require(a != FitAnswer.No, "cancelled: the image does not fit a dual-layer disc");
+                    if (a == FitAnswer.YesAlways) FitNoAsk = true;
                 }
-                if (n > 0) Report.Add("fit: " + n + " vanilla movies shortened to 10 frames");
-                if (total > DiscMax && sse.Count > 0) { total -= Sz(sse); removeSse(); }
+                if (movies.Count > 0)
+                {
+                    Ask("shorten the vanilla movies (intro, character endings, ...) to 10-frame clips");
+                    int n = 0;
+                    foreach (var f in movies)
+                    {
+                        if (total <= DiscMax) break;
+                        long len = new FileInfo(f).Length; var t = Thp.Truncate(File.ReadAllBytes(f), 10); Put(f, t); total -= len - t.Length; n++;
+                    }
+                    Report.Add("fit: " + n + " vanilla movies shortened to 10 frames"); Removed.Add(n + " vanilla movies (shortened to 10-frame clips)");
+                }
+                if (total > DiscMax && sse.Count > 0)
+                {
+                    Ask("delete Subspace Emissary (\"Delete Subspace Emissary\" is not checked)");
+                    total -= Sz(sse); removeSse(); Removed.Add("Subspace Emissary");
+                }
                 if (total > DiscMax && figs.Count > 0)
                 {
+                    Ask("replace the trophy models with one small model (the Trophy Gallery still works, but every trophy looks the same)");
                     foreach (var f in figs) { long len = new FileInfo(f).Length; if (len <= stub.Length) continue; total -= len - stub.Length; Put(f, stub); }
                     Report.Add("fit: " + figs.Count + " trophy models replaced by one small model (every trophy in the Vault looks the same)");
+                    Removed.Add(figs.Count + " trophy models (all trophies now show one small model)");
                 }
             }
             Log(string.Format("disc space: {0:F2} GB of unused vanilla data emptied, image {1:F2} GB", freed / 1e9, total / 1e9));

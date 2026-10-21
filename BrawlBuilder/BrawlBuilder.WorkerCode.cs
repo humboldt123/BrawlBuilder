@@ -732,8 +732,30 @@ namespace BrawlBuilder
 			return true;
 		}
 
+		private List<string> _exRemoved;  // what the EX build had to take out to fit the disc (shown when the build finishes)
+		private string FitNoAskFile => Path.Combine(_basePath, "BrawlBuilderEX.noask");
+
+		/// <summary>ask before a lossy step: do it / do it and don't ask again / cancel the build</summary>
+		private EX.ExBuild.FitAnswer AskFit(string msg)
+		{
+			var yes = new TaskDialogButton("Do it");
+			var always = new TaskDialogButton("Do it, and don't ask again");
+			var cancel = new TaskDialogButton("Cancel build");
+			var r = TaskDialog.ShowDialog(this, new TaskDialogPage
+			{
+				Caption = "BrawlBuilderEX",
+				Heading = "The image is too big for a Wii disc",
+				Text = msg + "\n\nWhen the build finishes you'll get a list of everything that was removed.",
+				Icon = TaskDialogIcon.Warning,
+				Buttons = { yes, always, cancel },
+				DefaultButton = yes,
+			});
+			return r == yes ? EX.ExBuild.FitAnswer.Yes : r == always ? EX.ExBuild.FitAnswer.YesAlways : EX.ExBuild.FitAnswer.No;
+		}
+
 		private bool RunEx()
 		{
+			_exRemoved = null;
 			SetStatus("Building EX...");
 			try
 			{
@@ -745,10 +767,14 @@ namespace BrawlBuilder
 				{
 					Log = s => SetStatus(s.Length > 40 ? s.Substring(0, 40) + "..." : s),
 					RemoveSubspace = removeSubspace.Checked,
-					ConfirmFit = msg => (bool)Invoke(new Func<bool>(() => MessageBox.Show(this, msg, "BrawlBuilderEX", MessageBoxButtons.YesNo, MessageBoxIcon.Warning) == DialogResult.Yes)),
+					AskFit = msg => (EX.ExBuild.FitAnswer)Invoke(new Func<EX.ExBuild.FitAnswer>(() => AskFit(msg))),
+					FitNoAsk = File.Exists(FitNoAskFile),
 					SubspaceList = _basePath + @"\Resources\SubspaceEmissaryFiles.txt"
 				};
 				b.Run("ssbb.d", m, customID.Checked ? gameID.Text : null);
+				_exRemoved = b.Removed;
+				if (b.FitNoAsk && !File.Exists(FitNoAskFile))
+					File.WriteAllText(FitNoAskFile, "BrawlBuilderEX: do what is needed to fit the disc without asking. Delete this file to be asked again.\r\n");
 				File.WriteAllLines(Path.Combine(_basePath, "BrawlBuilderEX.log"), b.Report);
 				if (Directory.Exists(work))
 					Directory.Delete(work, true);
@@ -1082,7 +1108,10 @@ namespace BrawlBuilder
 			{
 				if (File.Exists(_saveFileName))
 				{
-					MessageBox.Show("Build Completed!", "Success!", MessageBoxButtons.OK, MessageBoxIcon.Information);
+					if (_exRemoved != null && _exRemoved.Count > 0)
+						MessageBox.Show("Build Completed!\n\nTo fit on a dual-layer Wii disc, BrawlBuilderEX removed:\n\n- " + string.Join("\n- ", _exRemoved), "Success!", MessageBoxButtons.OK, MessageBoxIcon.Information);
+					else
+						MessageBox.Show("Build Completed!", "Success!", MessageBoxButtons.OK, MessageBoxIcon.Information);
 				}
 				else
 				{
