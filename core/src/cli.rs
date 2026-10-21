@@ -18,7 +18,8 @@ pub fn resources_dir() -> PathBuf {
     let exe = std::env::current_exe().ok();
     let base = exe.as_ref().and_then(|e| e.parent()).map(|p| p.to_path_buf()).unwrap_or_else(|| PathBuf::from("."));
     for c in [base.join("Resources"), base.join("resources"), base.join("..").join("Resources")] {
-        if c.is_dir() {
+        // (a macOS bundle's Contents/Resources is ../Resources too: ours is the one with CodePatches.txt)
+        if c.join("CodePatches.txt").is_file() {
             return c;
         }
     }

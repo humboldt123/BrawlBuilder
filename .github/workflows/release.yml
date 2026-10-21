@@ -1,0 +1,114 @@
+# Builds BrawlBuilderEx for Windows, macOS (universal) and Linux. Run it by hand (Actions > Release > Run workflow) to get the builds as
+# artifacts, or push a tag like v1.0.0 to also put them on a draft release (publish it from the Releases page).
+name: Release
+
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: windows-latest
+            name: windows
+          - os: macos-latest
+            name: macos
+          - os: ubuntu-22.04
+            name: linux
+    runs-on: ${{ matrix.os }}
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Linux packages
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libwebkit2gtk-4.1-dev libappindicator3-dev librsvg2-dev patchelf libncurses-dev zlib1g-dev
+
+      - name: Rust (the toolchain pinned in rust-toolchain.toml)
+        run: |
+          rustup show active-toolchain || rustup toolchain install
+          if [ "$RUNNER_OS" = macOS ]; then rustup target add aarch64-apple-darwin x86_64-apple-darwin; fi
+
+      - uses: Swatinem/rust-cache@v2
+
+      # Resources/wit has the Windows (cygwin) wit; macOS and Linux get wit built from Wiimm's source
+      - name: wit
+        if: runner.os != 'Windows'
+        run: |
+          # on failure the end of the output goes into an annotation (readable without signing in)
+          run() { "$@" > wit.log 2>&1 || { echo "::error title=wit build failed::$* $(tail -n 40 wit.log | awk '{gsub(/%/,"%25"); printf "%%0A%s", $0}')"; exit 1; }; }
+          git clone --depth 1 https://github.com/Wiimm/wiimms-iso-tools wit-src
+          if [ "$RUNNER_OS" = macOS ]; then
+            for a in arm64 x86_64; do
+              cp -R wit-src/project "wit-$a"
+              run make -C "wit-$a" SYSTEM=mac flags
+              # (wit's packed tables hold unaligned pointers, which arm64 chained fixups reject)
+              run make -C "wit-$a" SYSTEM=mac CC="clang -arch $a -Wl,-no_fixup_chains" wit
+            done
+            lipo -create wit-arm64/wit wit-x86_64/wit -output wit-bin
+          else
+            run make -C wit-src/project flags
+            STATIC=1 run make -C wit-src/project wit
+            cp wit-src/project/wit wit-bin
+          fi
+          rm -f Resources/wit/*.exe Resources/wit/*.dll
+          cp wit-bin Resources/wit/wit
+          chmod +x Resources/wit/wit
+          Resources/wit/wit version
+
+      - name: Build
+        working-directory: app
+        run: |
+          if [ "$RUNNER_OS" = macOS ]; then
+            npx --yes @tauri-apps/cli@2 build --target universal-apple-darwin
+          else
+            npx --yes @tauri-apps/cli@2 build
+          fi
+
+      - name: Collect
+        run: |
+          v=$(grep -m1 '"version"' app/tauri.conf.json | sed 's/.*: *"\(.*\)".*/\1/')
+          mkdir dist
+          case "$RUNNER_OS" in
+            Windows)
+              # portable zip, like the original BrawlBuilder: the program with Resources next to it
+              mkdir BrawlBuilderEx
+              cp target/release/BrawlBuilderEx.exe README.md LICENSE.TXT BrawlBuilderEx/
+              cp -r Resources BrawlBuilderEx/
+              7z a "dist/BrawlBuilderEx-$v-windows-portable.zip" BrawlBuilderEx > /dev/null
+              cp target/release/bundle/nsis/*.exe "dist/BrawlBuilderEx-$v-windows-setup.exe"
+              cp target/release/bundle/msi/*.msi "dist/BrawlBuilderEx-$v-windows.msi"
+              ;;
+            macOS)
+              cp target/universal-apple-darwin/release/bundle/dmg/*.dmg "dist/BrawlBuilderEx-$v-macos-universal.dmg"
+              ;;
+            Linux)
+              cp target/release/bundle/appimage/*.AppImage "dist/BrawlBuilderEx-$v-linux-x86_64.AppImage"
+              cp target/release/bundle/deb/*.deb "dist/BrawlBuilderEx-$v-linux-amd64.deb"
+              cp target/release/bundle/rpm/*.rpm "dist/BrawlBuilderEx-$v-linux-x86_64.rpm"
+              ;;
+          esac
+          ls -la dist
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: BrawlBuilderEx-${{ matrix.name }}
+          path: dist/*
+
+      - name: Draft release
+        if: startsWith(github.ref, 'refs/tags/')
+        uses: softprops/action-gh-release@v2
+        with:
+          draft: true
+          files: dist/*

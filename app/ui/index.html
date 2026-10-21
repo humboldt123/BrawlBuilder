@@ -5,7 +5,9 @@
 <title>BrawlBuilderEx</title>
 <style>
 /* the C# form, 1:1: 334x542, frameless, controls at their WinForms coordinates. Windows has the form's own fonts (Microsoft Sans
-   Serif, Impact); elsewhere the closest metric-compatible ones are used. */
+   Serif, Impact); elsewhere the closest metric-compatible ones are used, shipped in fonts/ (SIL OFL 1.1). */
+@font-face { font-family: Arimo; src: local("Arimo"), url(fonts/Arimo.ttf) format("truetype"); font-weight: 400 700; }
+@font-face { font-family: Anton; src: local("Anton"), local("Anton Regular"), url(fonts/Anton-Regular.ttf) format("truetype"); }
 :root { --fg: #e0e0e0; --ui: "Microsoft Sans Serif", Arimo, "Liberation Sans", Arial, sans-serif; --impact: Impact, Anton, "Arial Narrow", sans-serif; }
 html, body { margin: 0; background: #0b0d1c; overflow: hidden; }
 body { opacity: 0; transition: opacity .8s linear; }

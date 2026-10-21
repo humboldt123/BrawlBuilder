@@ -65,7 +65,8 @@ fn base_path(app: &AppHandle) -> PathBuf {
         let _ = std::fs::remove_file(&probe);
         ok
     };
-    if writable {
+    // (never inside a macOS .app bundle)
+    if writable && !cfg!(target_os = "macos") {
         exe
     } else {
         app.path().app_local_data_dir().unwrap_or(exe)
@@ -74,7 +75,7 @@ fn base_path(app: &AppHandle) -> PathBuf {
 
 fn resources(app: &AppHandle) -> PathBuf {
     let r = bbex_core::cli::resources_dir();
-    if r.is_dir() {
+    if r.join("CodePatches.txt").is_file() {
         return r;
     }
     app.path().resource_dir().map(|d| d.join("Resources")).unwrap_or(r)

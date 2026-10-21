@@ -14,11 +14,11 @@ Hopefully compatibility will be improved in the future.
 If you want to discuss BrawlBuilder, check out the official BrawlBuilder thread over on Smashboards: http://smashboards.com/threads/432675. If you have any issues with BrawlBuilderEx, open an issue on this repo: https://github.com/humboldt123/BrawlBuilderEX/issues
 
 ## Downloads
-BrawlBuilderEx is written in Rust with a [Tauri](https://tauri.app) window and is built for Windows, macOS and Linux (so far it has only been run on Windows). Releases are not published yet. Once they are, they will be on the releases page: https://github.com/humboldt123/BrawlBuilderEX/releases
+BrawlBuilderEx is written in Rust with a [Tauri](https://tauri.app) window and is built for Windows, macOS and Linux (so far it has only been run on Windows). Downloads are on the releases page: https://github.com/humboldt123/BrawlBuilderEX/releases
 
-Just grab the latest zip, extract it, and then run BrawlBuilderEx. The app should launch and you should be good to go.
+On Windows, just grab the latest portable zip, extract it, and then run BrawlBuilderEx (or use the installer). The app should launch and you should be good to go. On macOS use the `.dmg` (the app is not signed: the first time, right-click it and choose Open). On Linux use the `.AppImage`, `.deb` or `.rpm`.
 
-BrawlBuilderEx uses wit, which it looks for in `Resources/wit/` and then on the `PATH`. On macOS and Linux, install wit or put its binary in one of those places.
+BrawlBuilderEx uses wit, which comes with every download (`Resources/wit/`). If it is missing, BrawlBuilderEx looks for wit on the `PATH`.
 
 ### Building from source
 Run `cargo build --release` (the toolchain is pinned in `rust-toolchain.toml` and fetched by rustup), then put the `Resources` folder next to the program. `cargo tauri build` makes installers. The command line program is `brawlbuilderex-cli` (or `BrawlBuilderEx --ex ...`).
@@ -59,4 +59,4 @@ This builds a launcher-based mod as an EX build without the UI. `--tree <dir>` p
 - Secondly, thanks to the Dolphin team for the awesome debug mode of Dolphin, I wouldn't have been able to get alternate stages and the replacement soundbank engine working without that.
 - And thanks to the creators of all the ISO builder scripts for Project M and the like, they are what I initially based this off of.
 - BrawlBuilder and its window layout are by mogzol. The EX builds and the Rust rewrite are by humboldt123 with Claude. EX builds rely on the mods' own launchers and code lists, and on the work of the Project+, P+Ex, Legacy, Minus and Void teams.
-- The window background is the Project M website's galaxy background (PMDT). The logo intro is timed from Brawl's own title-screen animation.
+- The window background is the Project M website's galaxy background (PMDT). The logo intro is timed from Brawl's own title-screen animation. Outside Windows the window uses the Arimo and Anton fonts (SIL Open Font License, `app/ui/fonts`).
