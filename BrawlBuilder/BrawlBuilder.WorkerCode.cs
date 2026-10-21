@@ -16,6 +16,7 @@ namespace BrawlBuilder
 	partial class BrawlBuilder
 	{
 		private bool _remove_en;
+		private string _exPath;           // BrawlBuilderEX: the launcher-based mod to build self-contained (null = classic BrawlBuilder)
 		private bool _showWit;
 		private State _state;
 
@@ -123,7 +124,7 @@ namespace BrawlBuilder
 				switch (_state)
 				{
 					case State.Analyze:
-						if (gctFile.Text != "" && !Environment.GetCommandLineArgs().Contains("--no-gct-patch"))
+						if (_exPath == null && gctFile.Text != "" && !Environment.GetCommandLineArgs().Contains("--no-gct-patch"))
 						{
 							if (!Analyze())
 							{
@@ -165,7 +166,15 @@ namespace BrawlBuilder
 						break;
 
 					case State.CopyModFiles:
-						if (modFolder.Text != "")
+						if (_exPath != null)
+						{
+							if (!RunEx())
+							{
+								e.Cancel = true;
+								return;
+							}
+						}
+						else if (modFolder.Text != "")
 						{
 							if (!CopyModFiles())
 							{
@@ -189,7 +198,7 @@ namespace BrawlBuilder
 						break;
 
 					case State.Patch:
-						if (gctFile.Text != "" || customID.Checked)
+						if (_exPath == null && (gctFile.Text != "" || customID.Checked))
 						{
 							if (!Patch(pStartInfo))
 							{
@@ -721,6 +730,33 @@ namespace BrawlBuilder
 			}
 
 			return true;
+		}
+
+		private bool RunEx()
+		{
+			SetStatus("Building EX...");
+			try
+			{
+				string work = Path.Combine(_basePath, "ex.work");
+				EX.ExMod m = EX.ExMod.Resolve(_exPath, work, s => SetStatus(s));
+				if (m == null)
+					StopWorker("No launcher-based mod (RSBE01.GCT + gc.txt / gameconfig.txt, or an sd.raw) was found in the mod folder.");
+				var b = new EX.ExBuild
+				{
+					Log = s => SetStatus(s.Length > 40 ? s.Substring(0, 40) + "..." : s),
+					RemoveSubspace = removeSubspace.Checked,
+					SubspaceList = _basePath + @"\Resources\SubspaceEmissaryFiles.txt"
+				};
+				b.Run("ssbb.d", m, customID.Checked ? gameID.Text : null);
+				File.WriteAllLines(Path.Combine(_basePath, "BrawlBuilderEX.log"), b.Report);
+				if (Directory.Exists(work))
+					Directory.Delete(work, true);
+			}
+			catch (EX.ExException ex)
+			{
+				StopWorker("EX build failed: " + ex.Message, true);
+			}
+			return !buildWorker.CancellationPending;
 		}
 
 		private bool CopyBanner()

@@ -179,7 +179,18 @@ namespace BrawlBuilder
 				return;
 			}
 
-			if (modFolder.Text != "")
+			// BrawlBuilderEX: launcher-based mods (Project+, P+Ex, Legacy, Minus, Void, ...) are built self-contained (no SD card / launcher)
+			_exPath = null;
+			if (modFolder.Text != "" && LooksLikeLauncherMod(modFolder.Text))
+			{
+				DialogResult ex = MessageBox.Show("This looks like a launcher-based mod (it has its own code list and SD card folder).\n\nBuild a self-contained image that needs no SD card, no launcher and no cheat file? (recommended)\n\nThe whole mod folder is put on the disc and the mod's own code list is built in; the GCT field is not used.", "BrawlBuilderEX", MessageBoxButtons.YesNoCancel, MessageBoxIcon.Question);
+				if (ex == DialogResult.Cancel)
+					return;
+				if (ex == DialogResult.Yes)
+					_exPath = modFolder.Text;
+			}
+
+			if (modFolder.Text != "" && _exPath == null)
 			{
 				if (!Directory.Exists(modFolder.Text))
 				{
@@ -197,7 +208,7 @@ namespace BrawlBuilder
 				}
 			}
 
-			if (gctFile.Text != "" && !File.Exists(gctFile.Text))
+			if (_exPath == null && gctFile.Text != "" && !File.Exists(gctFile.Text))
 			{
 				MessageBox.Show("GCT file location is invalid", "Error", MessageBoxButtons.OK, MessageBoxIcon.Error);
 				return;
@@ -245,6 +256,25 @@ namespace BrawlBuilder
 
 			// Start background worker
 			buildWorker.RunWorkerAsync();
+		}
+
+		private static bool LooksLikeLauncherMod(string path)
+		{
+			try
+			{
+				if (File.Exists(path))
+					return path.EndsWith(".raw", StringComparison.OrdinalIgnoreCase);
+				string p = Path.GetFullPath(path);
+				for (int k = 0; k < 3 && p != null; k++, p = Path.GetDirectoryName(p))
+				{
+					if (Directory.EnumerateFiles(p, "*.raw").Any())
+						return true;
+					if (Directory.EnumerateFiles(p, "*", SearchOption.AllDirectories).Any(f => Path.GetFileName(f).Equals("RSBE01.GCT", StringComparison.OrdinalIgnoreCase)))
+						return true;
+				}
+			}
+			catch (Exception) { }
+			return false;
 		}
 
 		private void BrawlBuilder_FormClosing(object sender, FormClosingEventArgs e)

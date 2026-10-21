@@ -1,4 +1,20 @@
 # BrawlBuilderEx
+
+A fork of [mogzol/BrawlBuilder](https://github.com/mogzol/BrawlBuilder) that can build **launcher-based mods** (the Project+ family: Project+, P+Ex / PMEX Remix, Legacy, Brawl Minus, Brawl Void, ...) into a **self-contained disc image**: no SD card, no launcher app, no Gecko cheat file. The result is an ordinary (fake-signed) Wii image for USB Loader GX / Dolphin.
+
+Pick the mod's download folder (or its SD folder, its `pf` folder, or a folder with an `sd.raw`) as the mod folder; BrawlBuilder detects the launcher-based mod and offers the EX build. Everything else (ISO/WBFS input, custom ID and title, banner, removing Subspace) works as before. Command line: `BrawlBuilder.exe --ex --iso <Brawl USA Rev 2> --mod <mod> --out <file.wbfs> [--id RSBExx] [--name "Title"]`.
+
+### How EX works (nothing in it is specific to one mod)
+* **The SD card is on the disc.** The mod's SD folder (e.g. `/Minusery`, `/Project+`, `/ex_remix`, `/P+Ex`) goes onto the disc unchanged, packed into a few big files (`ex0.pak`, ...) with a hash index, and Brawl's own SD file functions (`FAFopen/FAFread/FAFseek/FAFclose/FAFstat`) are redirected to it. Every SD reader of these mods (File Patch Code, sound-bank and music streamers, Syringe plugins, BrawlEx configs, CSS roster, stage/tracklist loaders) keeps working without being touched.
+* **The launcher's job is done at build time.** The code handler is taken from the mod's own launcher, the code list goes to the address the launcher used (`codeliststart` in `gc.txt` / `gameconfig.txt`: lists built with GCTRealMate `-b` point into themselves), the handler is hooked like the launcher does (VBI), and the launcher's pre-pass is reproduced statically: unconditional RAM writes and C2 hooks are baked into `main.dol`, the CRT `.bss` clear spares the code list, and the File Patch Code's "SD mounted" flag is set.
+* **Memory layout.** The pack's hash index (4 bytes a file) sits below the FST, so the top of memory is lowered a little before `OSInit`. Mods that hard-code a heap at the vanilla top (BrawlEx's BrawlX heap, Syringe) have the heap and every pointer to it (code `lis/ori` pairs, data words, prefab heap headers, `common2.pac` relocations, extra `.gct` files) moved together; pointers into the vanilla FST's name table get their own copy of the string.
+* **Disc space.** Vanilla files that the mod replaces are never read, so they are emptied (FST entries kept). If the image still does not fit a dual-layer disc, the vanilla movies are shortened to valid 10-frame clips, then Subspace is removed, then the trophy models are emptied - each step is reported.
+
+Test status (Dolphin): see [`EX-TESTS.md`](EX-TESTS.md).
+
+---
+
+# BrawlBuilder
 The Ultimate Super Smash Bros Brawl ISO Builder
 
 ## About
