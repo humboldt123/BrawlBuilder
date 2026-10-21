@@ -1,0 +1,209 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>BrawlBuilderEx</title>
+<style>
+/* the C# form, 1:1: 334x542, frameless, controls at their WinForms coordinates. Windows has the form's own fonts (Microsoft Sans
+   Serif, Impact); elsewhere the closest metric-compatible ones are used. */
+:root { --fg: #e0e0e0; --ui: "Microsoft Sans Serif", Arimo, "Liberation Sans", Arial, sans-serif; --impact: Impact, Anton, "Arial Narrow", sans-serif; }
+html, body { margin: 0; background: #0b0d1c; overflow: hidden; }
+body { opacity: 0; transition: opacity .8s linear; }
+body.shown { opacity: 1; }
+.win {
+  position: relative; width: 334px; height: 542px; overflow: hidden;
+  background: url(bg.png) center / cover; font: 11px var(--ui); color: var(--fg);
+  user-select: none; -webkit-user-select: none; cursor: default;
+}
+.abs { position: absolute; }
+.exit { left: 312px; top: 4px; width: 18px; height: 18px; cursor: pointer; display: grid; place-items: center; z-index: 5; }
+.exit::before, .exit::after { content: ""; position: absolute; width: 14px; height: 2px; background: var(--fg); }
+.exit::before { transform: rotate(45deg); } .exit::after { transform: rotate(-45deg); }
+.exit:hover::before, .exit:hover::after { background: #fff; }
+
+/* logo: one layer per piece (logo/layers.json); intro timed from Brawl's title animation (sc_title TitleFront) */
+.logo { left: 7px; top: 36px; width: 320px; height: 113.7px; pointer-events: none; }
+.logo .lyr, .logo img { position: absolute; }
+.logo .lyr { inset: 0; }
+.flash { left: 0; top: 0; width: 334px; height: 542px; background: #fff; opacity: 0; pointer-events: none; mix-blend-mode: screen; z-index: 4; }
+.shine { left: 7px; top: 36px; width: 320px; height: 113.7px; pointer-events: none; opacity: 0;
+  -webkit-mask: url(logo.png) center / 100% 100%; mask: url(logo.png) center / 100% 100%;
+  background: linear-gradient(105deg, transparent 40%, rgba(255,255,255,.8) 50%, transparent 60%) 0 0 / 300% 100% no-repeat; }
+
+/* link labels (Microsoft Sans Serif 9.75pt, #e0e0e0, underline on hover) */
+.lnk { font-size: 13px; color: var(--fg); cursor: pointer; text-shadow: 0 1px 2px #000; white-space: nowrap; }
+.lnk:hover { text-decoration: underline; }
+.lnk:active { color: #f0f; }
+.lnk.off { pointer-events: none; }
+/* textboxes and buttons in the classic Windows look */
+.tb { height: 20px; box-sizing: border-box; border: 1px solid #7a7a7a; background: #fff; color: #000; font: 11px var(--ui); padding: 1px 3px; outline: none; }
+.tb:focus { border-color: #0078d7; }
+.tb:disabled { background: #f0f0f0; border-color: #bfbfbf; color: #6d6d6d; }
+.btn { height: 22px; width: 75px; box-sizing: border-box; font: 11px var(--ui); color: #000; border: 1px solid #adadad; border-radius: 2px;
+  background: linear-gradient(#f2f2f2, #e5e5e5); padding: 0; }
+.btn:hover:not(:disabled) { border-color: #0078d7; background: linear-gradient(#eaf6fd, #d9f0fc); }
+.btn:active:not(:disabled) { background: #cce4f7; }
+.btn:disabled { color: #a0a0a0; border-color: #cfcfcf; background: #f4f4f4; }
+/* group box */
+.grp { left: 12px; top: 282px; width: 310px; height: 128px; box-sizing: border-box; margin: 0; padding: 4px 8px 8px; border: 1px solid rgba(224,224,224,.55); border-radius: 3px;
+  display: flex; flex-direction: column; justify-content: space-between; min-width: 0; max-width: 310px; overflow: hidden; }
+.grp > legend { margin-left: 6px; padding: 0 2px; font-size: 11px; color: var(--fg); text-shadow: 0 1px 2px #000; }
+.row { display: flex; align-items: center; gap: 6px; height: 22px; min-width: 0; }
+.row .lab { width: 112px; flex: none; }
+.row .grow { flex: 1; min-width: 0; }
+.row .btn { flex: none; }
+.cb { font-size: 11px; color: var(--fg); display: flex; align-items: center; gap: 4px; white-space: nowrap; text-shadow: 0 1px 2px #000; overflow: hidden; text-overflow: ellipsis; }
+.cb input { margin: 0; width: 13px; height: 13px; }
+.cb.off { opacity: .55; }
+/* Build ISO: flat, 2 px #e0e0e0 border, Impact 36pt white; hover #101731, pressed #0a0f21 */
+.build { left: 12px; top: 428px; width: 310px; height: 102px; box-sizing: border-box; border: 2px solid var(--fg); background: transparent;
+  color: #fff; font: 48px var(--impact); letter-spacing: .01em; cursor: pointer; white-space: nowrap; overflow: hidden; padding: 0; }
+.build:hover { background: #101731; }
+.build:active { background: #0a0f21; }
+</style>
+</head>
+<body>
+<div class="win" id="win">
+  <div class="abs exit" id="exit" title="Close"></div>
+  <div class="abs logo" id="logo" aria-label="BrawlBuilderEx"></div>
+  <div class="abs shine" id="shine"></div>
+  <div class="abs flash" id="flash"></div>
+
+  <span class="abs lnk" data-help="iso" style="right:224px;top:179px">Brawl ISO (?):</span>
+  <input class="abs tb" id="brawlIso" style="left:116px;top:178px;width:125px" spellcheck="false">
+  <button class="abs btn" id="brawlIsoBrowse" style="left:247px;top:177px">Browse...</button>
+
+  <span class="abs lnk" data-help="mod" style="right:224px;top:214px">Mod Folder (?):</span>
+  <input class="abs tb" id="modFolder" style="left:116px;top:213px;width:125px" spellcheck="false">
+  <button class="abs btn" id="modFolderBrowse" style="left:247px;top:212px">Browse...</button>
+
+  <span class="abs lnk" data-help="gct" style="right:224px;top:249px">GCT File (?):</span>
+  <input class="abs tb" id="gctFile" style="left:116px;top:248px;width:125px" spellcheck="false">
+  <button class="abs btn" id="gctFileBrowse" style="left:247px;top:247px">Browse...</button>
+
+  <fieldset class="abs grp" id="extrasBox"><legend>Optional Extras</legend>
+    <div class="row"><label class="cb"><input type="checkbox" id="removeSubspace">Delete Subspace Emissary (greatly reduces size)</label></div>
+    <div class="row"><label class="cb lab"><input type="checkbox" id="customID">Change game ID:</label><input class="tb" id="gameID" style="width:73px" maxlength="6" disabled spellcheck="false"></div>
+    <div class="row"><label class="cb lab"><input type="checkbox" id="customTitle">Change game title:</label><input class="tb grow" id="gameTitle" maxlength="63" disabled spellcheck="false"></div>
+    <div class="row"><label class="cb lab"><input type="checkbox" id="customBanner">Custom banner:</label><input class="tb grow" id="banner" disabled spellcheck="false"><button class="btn" id="bannerBrowse" disabled>Browse...</button></div>
+  </fieldset>
+
+  <button class="abs build" id="build">Build ISO</button>
+</div>
+
+<script>
+const T = window.__TAURI__, invoke = T.core.invoke, listen = T.event.listen, appWindow = T.window.getCurrentWindow();
+const $ = id => document.getElementById(id);
+const BUILD_TEXT = 'Build ISO';
+
+// ---------------------------------------------------------------------------------------------------------- form
+for (const el of document.querySelectorAll('[data-help]')) el.onclick = () => invoke('help', { which: el.dataset.help });
+const browse = (btn, cmd, field) => $(btn).onclick = async () => { const p = await invoke(cmd); if (p) $(field).value = p; };
+browse('brawlIsoBrowse', 'browse_iso', 'brawlIso');
+browse('modFolderBrowse', 'browse_mod', 'modFolder');
+browse('gctFileBrowse', 'browse_gct', 'gctFile');
+browse('bannerBrowse', 'browse_banner', 'banner');
+$('customID').onchange = e => $('gameID').disabled = !e.target.checked;
+$('customTitle').onchange = e => $('gameTitle').disabled = !e.target.checked;
+$('customBanner').onchange = e => { $('banner').disabled = !e.target.checked; $('bannerBrowse').disabled = !e.target.checked; };
+$('exit').onclick = () => invoke('exit_click');
+
+// For dragging the form around
+$('win').addEventListener('mousedown', e => {
+  if (e.button === 0 && !e.target.closest('input, button, label, .lnk, .exit, legend')) appWindow.startDragging();
+});
+
+const form = () => ({
+  brawlIso: $('brawlIso').value, modFolder: $('modFolder').value, gctFile: $('gctFile').value,
+  removeSubspace: $('removeSubspace').checked,
+  customId: $('customID').checked, gameId: $('gameID').value,
+  customTitle: $('customTitle').checked, gameTitle: $('gameTitle').value,
+  customBanner: $('customBanner').checked, banner: $('banner').value,
+});
+$('build').onclick = () => invoke('build_click', { form: form() });
+
+// ---------------------------------------------------------------------------------------------------------- build status
+// the button shows the status; while a step reports progress it blinks: status for ~2 s, then the percentage for ~4 s
+let building = false, dontTouch = false, curStatus = BUILD_TEXT, progress = null, blinkT0 = 0, hovering = false;
+const show = () => {
+  const b = $('build');
+  if (building && hovering && !dontTouch) { b.textContent = 'Cancel?'; return; }
+  if (progress !== null && !dontTouch) {
+    const t = (performance.now() - blinkT0) % 6000;
+    if (t >= 2000) { b.textContent = Math.floor(progress) + '%'; return; }
+  }
+  b.textContent = curStatus;
+};
+setInterval(show, 100);
+listen('status', e => { curStatus = e.payload; show(); });
+listen('progress', e => {
+  const p = e.payload;
+  if (p === null) progress = null;
+  else { if (progress === null) blinkT0 = performance.now(); progress = p; }
+  show();
+});
+listen('cancelling', e => { dontTouch = true; curStatus = e.payload; show(); });
+listen('building', e => {
+  building = e.payload;
+  // Disable form controls / Re-enable controls
+  for (const el of document.querySelectorAll('input, .btn, .lnk, .cb')) {
+    if (building) { el.dataset.was = el.disabled ? '1' : ''; if ('disabled' in el) el.disabled = true; el.classList.add('off'); }
+    else { if ('disabled' in el) el.disabled = el.dataset.was === '1'; el.classList.remove('off'); }
+  }
+  if (!building) { dontTouch = false; progress = null; curStatus = BUILD_TEXT; }
+  show();
+});
+$('build').onmouseenter = () => { hovering = true; show(); };
+$('build').onmouseleave = () => { hovering = false; show(); };
+
+// ---------------------------------------------------------------------------------------------------------- logo intro
+// Timed like Brawl's title (sc_title_en.pac, TitleFront CHR0/VIS0, 60 fps), shifted so Brawl's frame 45 = our 0:
+//  f0      swoosh + words appear together; a streak copy of the swoosh shows until the impact (Line2, f45-58)
+//  f0-20   words ("Brawls" bone) start at 1.7x, left and low, slide into place; 1.5x from f3
+//  f10-15  impact shake ("Brawl"/"Line" ty jitter), f14 white flash ("White" plate on at f59) and a punch (title 2.5x -> 1x)
+//  f38-44  words settle 1.5x -> 1x
+//  EX      unfolds like the SUPER SMASH BROS. letters: from a sliver (2% one way, 6-13x the other) back to 1x in ~10 frames
+async function intro() {
+  const F = 1000 / 60, box = $('logo'), man = await (await fetch('logo/layers.json')).json();
+  const k = 320 / man.w, el = {};
+  const sw = Object.assign(document.createElement('div'), { className: 'lyr' }), words = Object.assign(document.createElement('div'), { className: 'lyr' });
+  box.append(sw, words);
+  for (const l of man.layers) {
+    const im = new Image(); im.src = `logo/${l.name}.png`; im.draggable = false;
+    Object.assign(im.style, { left: l.x * k + 'px', top: l.y * k + 'px', width: l.w * k + 'px', height: l.h * k + 'px' });
+    (/^(brawl|builder)/.test(l.name) ? words : l.name === 'swoosh' ? sw : box).appendChild(im); el[l.name] = im;
+  }
+  await Promise.all(Object.values(el).map(i => i.decode().catch(() => {})));
+  const A = (e, kf, f0, f1, easing = 'linear') => e.animate(kf, { delay: f0 * F, duration: (f1 - f0) * F, easing, fill: 'both' });
+  A(sw, [{ clipPath: 'inset(0 100% 0 0)' }, { clipPath: 'inset(0 0 0 0)' }], 0, 14, 'cubic-bezier(.2,.8,.3,1)');
+  A(sw, [{ transform: 'translateY(0)' }, { transform: 'translateY(1.2%)' }, { transform: 'translateY(-1%)' }, { transform: 'translateY(.6%)' }, { transform: 'translateY(0)' }], 0, 5);
+  words.style.transformOrigin = '42% 45%';
+  A(words, [
+    { offset: 0, transform: 'translate(-19%, 4%) scale(1.7)', opacity: 0 },
+    { offset: 1 / 44, transform: 'translate(-18%, 4%) scale(1.7)', opacity: 1 },
+    { offset: 3 / 44, transform: 'translate(-15%, 3.4%) scale(1.5)' },
+    { offset: 20 / 44, transform: 'translate(0, 0) scale(1.5)', easing: 'linear' },
+    { offset: 38 / 44, transform: 'translate(0, 0) scale(1.5)', easing: 'cubic-bezier(.3,1.4,.5,1)' },
+    { offset: 1, transform: 'none', opacity: 1 }], 0, 44, 'cubic-bezier(.15,.7,.3,1)');
+  A(box, [{ transform: 'none' }, { transform: 'translate(0,-2.4%)' }, { transform: 'translate(0,1.6%)' }, { transform: 'translate(0,-1.4%)' },
+          { transform: 'translate(0,1.0%)' }, { transform: 'translate(0,-.5%)' }, { transform: 'none' }], 10, 16);
+  A($('flash'), [{ opacity: 0 }, { opacity: .55, offset: .1 }, { opacity: 0 }], 14, 26, 'ease-out');
+  for (const [n, f0, a, b] of [['ex_e', 46, .02, 6], ['ex_x', 50, 8, .02]]) {
+    el[n].style.transformOrigin = '50% 50%';
+    A(el[n], [{ transform: `scale(${a},${b})` }, { transform: `scale(${a},${b})`, offset: .11 }, { transform: 'none' }], f0, f0 + 11, 'cubic-bezier(.2,1.3,.4,1)');
+    A(el[n], [{ opacity: 0 }, { opacity: 1 }], f0 - .01, f0);
+  }
+  A(el.subtitle, [{ transform: 'translateY(40%)', opacity: 0 }, { transform: 'none', opacity: 1 }], 60, 78, 'ease-out');
+  A($('shine'), [{ opacity: 1, backgroundPosition: '100% 0' }, { opacity: 1, backgroundPosition: '0% 0' }], 85, 135, 'ease-in-out');
+}
+
+// the form fades in when shown (Form1_Shown)
+window.addEventListener('DOMContentLoaded', async () => {
+  await appWindow.show();
+  requestAnimationFrame(() => document.body.classList.add('shown'));
+  intro();
+});
+document.addEventListener('contextmenu', e => { if (!e.target.closest('input')) e.preventDefault(); });
+</script>
+</body>
+</html>

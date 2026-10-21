@@ -1,0 +1,21 @@
+[package]
+name = "brawlbuilderex"
+description = "BrawlBuilderEx: the ultimate Super Smash Bros. Brawl ISO builder"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+authors.workspace = true
+
+[[bin]]
+name = "BrawlBuilderEx"
+path = "src/main.rs"
+
+[build-dependencies]
+tauri-build = { version = "2", features = [] }
+
+[dependencies]
+bbex-core = { path = "../core" }
+tauri = { version = "2", features = [] }
+tauri-plugin-dialog = "2"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"

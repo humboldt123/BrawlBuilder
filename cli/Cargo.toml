@@ -1,0 +1,14 @@
+[package]
+name = "bbex-cli"
+description = "BrawlBuilderEx command line (EX builds)"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+authors.workspace = true
+
+[[bin]]
+name = "brawlbuilderex-cli"
+path = "src/main.rs"
+
+[dependencies]
+bbex-core = { path = "../core" }
