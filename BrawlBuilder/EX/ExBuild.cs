@@ -30,7 +30,7 @@ namespace BrawlBuilder.EX
         public const long DiscMax = 8511160320L * 31 / 32 - 96L * 1024 * 1024;   // file data a dual-layer Wii disc holds (31 of every 32 KiB; the rest is hashes), minus headroom
         public bool KeepShadowed;                                         // diagnosis: keep vanilla files the mod replaces
         public bool FreeDiscSpace = true;                                 // empty shadowed vanilla files / fit the disc (off: diagnosis, folder boot)
-        public bool Mem2Index;                                            // diagnostic: put the SD index in MEM2
+        public bool Mem1Index;                                            // diagnosis: force the MEM1 placement (heap move)                                            // diagnostic: put the SD index in MEM2
         // the EX RAM block + hash table are placed at boot FstMargin below the FST; the arena/heap move is sized for an FST up to
         // FstSlack bigger than this builder computes (Dolphin lays out folder-boot FSTs ~8 KiB bigger than wit images)
         const uint Mem2Top = 0x935E0000, FstMargin = 0x100, FstSlack = 0x6000;                 // (+ the 8 KiB BI2 block under the FST)
@@ -72,23 +72,30 @@ namespace BrawlBuilder.EX
             // 3. memory layout
             var extraGcts = sd.Where(x => x.Disc.EndsWith(".gct", StringComparison.OrdinalIgnoreCase) && !SamePath(x.Src, m.GctPath)).ToList();
             bool usesHeap = UsesHeap(codes, extraGcts, sd);
-            // the SD folder becomes one pack file (SdPack): the FST stays about vanilla-sized and only the pack's hash table (4 bytes a file)
-            // needs room below it, made by lowering the arena top before OSInit; hard-coded heaps at the vanilla top move by whole 64 KiB steps
+            // the SD folder becomes pack files (SdPack), so the FST stays about vanilla-sized. Their hash table (4 bytes a file) and the EX RAM
+            // go at the top of the MEM2 arena, leaving MEM1 exactly vanilla. Only if the FST still outgrows the vanilla one (which would push
+            // the arena top below a heap the mod hard-codes there) do they go under the FST in MEM1 instead, with that heap and every pointer
+            // to it moved down by whole 64 KiB steps (that path is fragile: a mod's own data can hold pointers we cannot see).
             string rootDir = Path.Combine(files, m.Root);
             var (nFiles, packNames) = SdPack.Layout(files, m.Root);
             uint fstAfter = FstSize(files, rootDir) + (uint)packNames.Sum(x => 12 + x.Length + 1);
             uint dataSize = Shims.DataSize(packNames.Count);
-            uint fstStart = ArenaHi(fstAfter), dataAddr = (fstStart - FstSlack - FstMargin - SdPack.IndexLoad(nFiles) - dataSize) & ~0x1Fu, idxAddr = dataAddr + dataSize;
-            int n = !usesHeap || dataAddr >= GeckoList.VanArenaHi ? 0 : (int)((GeckoList.VanArenaHi - dataAddr + 0xFFFF) / 0x10000);
-            int delta = -0x10000 * n; uint targetHi = usesHeap ? (uint)(GeckoList.VanArenaHi + delta) : dataAddr;
-            if (Mem2Index)
+            uint fstStart = ArenaHi(fstAfter);
+            bool mem2 = !Mem1Index && (!usesHeap || fstStart >= GeckoList.VanArenaHi);
+            int delta = 0; uint targetHi = 0;
+            if (mem2)
             {
-                // diagnostic: index + EX RAM at the top of the MEM2 arena, MEM1 and the hard-coded heaps exactly vanilla
-                Bin.Require(fstStart >= GeckoList.VanArenaHi, "--mem2-index needs an FST no bigger than vanilla");
-                dataAddr = (Mem2Top - SdPack.IndexLoad(nFiles) - dataSize) & ~0x1Fu; idxAddr = dataAddr + dataSize; delta = 0; targetHi = GeckoList.VanArenaHi; usesHeap = true;
+                targetHi = usesHeap ? GeckoList.VanArenaHi : 0;
+                Log(string.Format("SD pack: {0} files in {1} pack file(s); hash table 0x{2:X} bytes + EX RAM at the top of MEM2 (MEM1 untouched)", nFiles, packNames.Count, SdPack.IndexLoad(nFiles)));
             }
-            Log(string.Format("SD pack: {0} files in " + packNames.Count + " pack file(s), hash table 0x{1:X} bytes (+ EX RAM) placed at boot below the FST (~0x{5:X8}); arena top 0x{3:X8}{4}", nFiles, SdPack.IndexLoad(nFiles), idxAddr, targetHi,
-                usesHeap ? string.Format(", BrawlX/Syringe heap moved by -0x{0:X}", -delta) : " (no hard-coded heap in this mod)", dataAddr));
+            else
+            {
+                uint dataAddr = (fstStart - FstSlack - FstMargin - SdPack.IndexLoad(nFiles) - dataSize) & ~0x1Fu;
+                int n = !usesHeap || dataAddr >= GeckoList.VanArenaHi ? 0 : (int)((GeckoList.VanArenaHi - dataAddr + 0xFFFF) / 0x10000);
+                delta = -0x10000 * n; targetHi = usesHeap ? (uint)(GeckoList.VanArenaHi + delta) : 0;
+                Log(string.Format("SD pack: {0} files in {1} pack file(s); hash table 0x{2:X} bytes + EX RAM under the FST (~0x{3:X8}){4}", nFiles, packNames.Count, SdPack.IndexLoad(nFiles), dataAddr,
+                    usesHeap ? string.Format(", arena top 0x{0:X8}, BrawlX/Syringe heap moved by -0x{1:X}", targetHi, -delta) : ""));
+            }
             if (delta != 0)
                 foreach (var (src, disc) in sd.Where(x => System.Text.RegularExpressions.Regex.IsMatch(x.Disc, @"(?i)/system/common2(_en)?\.pac$")))
                 {
@@ -183,7 +190,7 @@ namespace BrawlBuilder.EX
             var protect = new List<(uint, uint)> { (clSec, dataEnd) }; protect.AddRange(blobs.Select(b => (b.Lo, b.Lo + (uint)b.B.Length)));
             // the EX helpers go in the low-memory space after the handler where no code of the mod touches (P+Ex's VBI hook switch writes
             // 0x80002778, Legacy TE's Tags Controls keeps a flag at 0x80002800 that redirects boot to the Controls menu), else after the code list
-            uint shimLen = (uint)Shims.Build(0x80002000, protect.Concat(new[] { (0u, 0u) }), pk, usesHeap ? targetHi : 0, FstMargin, Mem2Index ? dataAddr : 0).Code.Length;
+            uint shimLen = (uint)Shims.Build(0x80002000, protect.Concat(new[] { (0u, 0u) }), pk, targetHi, FstMargin, mem2).Code.Length;
             var used = GeckoList.WritesIn(gct, LowLo, LowHi);
             foreach (var (src, _) in extraGcts) { var raw = File.ReadAllBytes(src); if (raw.Length >= 16 && Bin.Get32(raw, 0) == 0x00D0C0DE) used.AddRange(GeckoList.WritesIn(GeckoList.Parse(raw), LowLo, LowHi)); }
             uint shimBase = 0;
@@ -198,7 +205,7 @@ namespace BrawlBuilder.EX
                 shimBase = dataEnd; protect.Add((shimBase, (shimBase + shimLen + 0x1F) & ~0x1Fu));
                 Bin.Require(shimBase + shimLen <= m.CodeListEnd, "no room for the EX helpers (low memory is used by the mod's codes and the code list area is full)");
             }
-            var (shim, labels) = Shims.Build(shimBase, protect, pk, usesHeap ? targetHi : 0, FstMargin, Mem2Index ? dataAddr : 0);
+            var (shim, labels) = Shims.Build(shimBase, protect, pk, targetHi, FstMargin, mem2);
             Bin.Require(shim.Length <= shimLen, "EX helpers grew");
             var h = (byte[])m.Handler.Clone();
             Bin.Require(Bin.Get32(h, 0x104) == 0x3DE08000 && Bin.Get32(h, 0x108) == 0x61EF22A8, "unexpected handler template");
@@ -244,8 +251,8 @@ namespace BrawlBuilder.EX
                 if (hit != null && KeepShadowed) continue;
                 if (hit != null && new FileInfo(hit).Length > 0) { freed += new FileInfo(hit).Length; Put(hit, new byte[0]); }
             }
-            foreach (var d in new[] { "dummy1.dat", "dummy2.dat", "border.dat" })
-            { var f = Path.Combine(files, d); if (File.Exists(f)) { freed += new FileInfo(f).Length; Put(f, new byte[0]); } }
+            foreach (var d in new[] { "dummy1.dat", "dummy2.dat", "border.dat" })      // disc padding, never read: removed (keeps the FST small)
+            { var f = Path.Combine(files, d); if (File.Exists(f)) { freed += new FileInfo(f).Length; File.Delete(f); } }
             var sse = SubspaceList != null && File.Exists(SubspaceList)
                 ? File.ReadLines(SubspaceList).Select(l => l.Trim()).Where(l => l.Length > 0).Select(l => Path.Combine(files, l.Replace((char)92, Path.DirectorySeparatorChar))).Where(File.Exists).ToList()
                 : new List<string>();

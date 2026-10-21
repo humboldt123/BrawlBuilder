@@ -33,7 +33,7 @@ namespace BrawlBuilder.EX
                     Console.WriteLine("extracting Brawl ...");
                     Bin.Require(Wit(wit, "extract \"" + iso + "\" \"" + tree + "\" --psel=DATA -1ovv") == 0, "wit extract failed");
                 }
-                var b = new ExBuild { Log = Console.WriteLine, RemoveSubspace = Has("--remove-sse"), Bake = !Has("--no-bake"), Fit = Has("--fit"), Mem2Index = Has("--mem2-index"), FreeDiscSpace = !Has("--no-free"), KeepShadowed = Has("--keep-shadowed"), SubspaceList = Path.Combine(AppContext.BaseDirectory, "Resources", "SubspaceEmissaryFiles.txt") };
+                var b = new ExBuild { Log = Console.WriteLine, RemoveSubspace = Has("--remove-sse"), Bake = !Has("--no-bake"), Fit = Has("--fit"), Mem1Index = Has("--mem1-index"), FreeDiscSpace = !Has("--no-free"), KeepShadowed = Has("--keep-shadowed"), SubspaceList = Path.Combine(AppContext.BaseDirectory, "Resources", "SubspaceEmissaryFiles.txt") };
                 b.Run(tree, m, id);
                 foreach (var r in b.Report) Console.WriteLine("  " + r);
                 if (outp != null)

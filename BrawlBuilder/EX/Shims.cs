@@ -173,17 +173,25 @@ namespace BrawlBuilder.EX
             a.Label("st_ret"); LaD(a, 3, MTX); a.Bl(OsUnlockMutex); a.W(Ppc.Mr(3, 31)); Epilog(a, 3);
         }
 
-        static void BssClear(Asm a, uint arenaHi, uint below, uint dataSize, uint mem2Base)
+        static void BssClear(Asm a, uint arenaHi, uint below, uint dataSize, bool mem2)
         {
-            // runs from __init_data, before OSInit. The EX RAM block + hash table go <below> bytes under the FST the apploader actually
-            // placed (0x80000038) - or at mem2Base - and the MEM1 arena top OSInit uses (0x80003110, else BI2 0x80000034) is set to
-            // min(arenaHi, block) (arenaHi 0: the block itself)
+            // runs from __init_data (once per .bss section), before OSInit. On the first call the EX RAM block + hash table are placed:
+            //  mem2: <below> bytes under the MEM2 arena top (0x80003128, lowered to the block); the MEM1 arena top is set to arenaHi if given
+            //  else: under the FST the apploader placed (0x80000038) and its BI2 block (0x800000F4); the MEM1 arena top OSInit uses
+            //        (0x80003110, else BI2 0x80000034) becomes min(arenaHi, block) (arenaHi 0: the block itself)
             // bss_clear(r3 = start, r4 = 0, r5 = size): memset every gap of [start, start+size) not covered by the protect table
             a.Label("bss");
             a.W(Ppc.Stwu(1, -0x20, 1)); a.W(Ppc.Mflr(0)); a.W(Ppc.Stw(0, 0x24, 1)); a.W(Ppc.Stmw(27, 0x0C, 1));
             a.W(Ppc.Mr(31, 3)); a.W(Ppc.Add(30, 3, 5));
+            a.W((pc, l) => Ppc.Lis(10, (int)(((l["ram"] + 0x8000) >> 16) & 0xFFFF))); a.W((pc, l) => Ppc.Lwz(0, (int)(short)(l["ram"] & 0xFFFF), 10));
+            a.W(Ppc.Cmpwi(0, 0)); a.Bc("ne", "placed");
             a.W(Ppc.Lis(11, 0x8000));
-            if (mem2Base != 0) { a.La(12, mem2Base); a.W(Ppc.Stw(12, 0x3128, 11)); a.La(9, arenaHi); }
+            if (mem2)
+            {
+                a.W(Ppc.Lwz(12, 0x3128, 11)); a.W(Ppc.Cmpwi(12, 0)); a.Bc("ne", "m2_ok"); a.La(12, 0x935E0000);
+                a.Label("m2_ok"); a.La(10, below); a.W(Ppc.Subf(12, 10, 12)); a.W(Ppc.Rlwinm(12, 12, 0, 0, 26)); a.W(Ppc.Stw(12, 0x3128, 11));
+                if (arenaHi != 0) { a.La(9, arenaHi); a.W(Ppc.Stw(9, 0x34, 11)); a.W(Ppc.Stw(9, 0x3110, 11)); }
+            }
             else
             {
                 // below the FST (0x80000038) and the BI2 block the apploader leaves under it (0x800000F4)
@@ -192,10 +200,11 @@ namespace BrawlBuilder.EX
                 a.Label("bi2_ok"); a.La(10, below); a.W(Ppc.Subf(12, 10, 12)); a.W(Ppc.Rlwinm(12, 12, 0, 0, 26));
                 a.W(Ppc.Mr(9, 12));
                 if (arenaHi != 0) { a.La(10, arenaHi); a.W(Ppc.Cmplw(10, 12)); a.Bc("ge", "ah_min"); a.W(Ppc.Mr(9, 10)); a.Label("ah_min"); }
+                a.W(Ppc.Stw(9, 0x34, 11)); a.W(Ppc.Stw(9, 0x3110, 11));
             }
-            a.W(Ppc.Stw(9, 0x34, 11)); a.W(Ppc.Stw(9, 0x3110, 11));
             a.W((pc, l) => Ppc.Lis(10, (int)(((l["ram"] + 0x8000) >> 16) & 0xFFFF))); a.W((pc, l) => Ppc.Stw(12, (int)(short)(l["ram"] & 0xFFFF), 10));
             a.W(Ppc.Mr(3, 12)); a.W(Ppc.Li(4, 0)); a.La(5, dataSize); a.Bl(Memset);
+            a.Label("placed");
             a.W((pc, l) => Ppc.Lis(29, (int)(((l["table"] + 0x8000) >> 16) & 0xFFFF))); a.W((pc, l) => Ppc.Addi(29, 29, (int)(l["table"] & 0xFFFF)));
             a.Label("loop");
             a.W(Ppc.Lwz(28, 0, 29)); a.W(Ppc.Cmpwi(28, 0)); a.Bc("eq", "tail");
@@ -215,12 +224,12 @@ namespace BrawlBuilder.EX
         }
 
         /// <summary>assemble at <paramref name="baseAddr"/>. RAM block + hash table: <paramref name="fstMargin"/> below the FST (or at
-        /// <paramref name="mem2Base"/>); <paramref name="arenaHi"/>: fixed MEM1 arena top for mods with hard-coded heaps (0: none)</summary>
-        public static (byte[] Code, Dictionary<string, uint> Labels) Build(uint baseAddr, IEnumerable<(uint Lo, uint Hi)> protect, PackInfo pack, uint arenaHi, uint fstMargin, uint mem2Base = 0)
+        /// top of MEM2 (<paramref name="mem2"/>)); <paramref name="arenaHi"/>: fixed MEM1 arena top (0: leave / the block)</summary>
+        public static (byte[] Code, Dictionary<string, uint> Labels) Build(uint baseAddr, IEnumerable<(uint Lo, uint Hi)> protect, PackInfo pack, uint arenaHi, uint fstMargin, bool mem2)
         {
             var a = new Asm(baseAddr);
             uint ds = DataSize(pack.Paths.Count);
-            BssClear(a, arenaHi, (fstMargin + ds + pack.IndexLoad + 0x1F) & ~0x1Fu, ds, mem2Base);
+            BssClear(a, arenaHi, ((mem2 ? 0 : fstMargin) + ds + pack.IndexLoad + 0x1F) & ~0x1Fu, ds, mem2);
             SdDisc(a, pack);
             a.Label("table");
             foreach (var r in protect.OrderBy(r => r.Lo)) { a.W(r.Lo); a.W(r.Hi); }
