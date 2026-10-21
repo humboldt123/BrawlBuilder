@@ -65,6 +65,23 @@ namespace BrawlBuilder.EX
                 else continue;
                 if (a < hi && a + n > lo) o.Add((a, a + n));
             }
+            // ASM in the payloads addresses low memory itself: "lis rX,0x8000" + a load/store/addi/ori with a displacement in range
+            // (Legacy TE's Tags Controls keeps a flag at 0x80002800), or a plain pointer word - conservative, the whole list as words
+            var w = l.SelectMany(x => new[] { x.A, x.B }).ToList();
+            for (int i = 0; i < w.Count; i++)
+            {
+                if (w[i] >= lo && w[i] < hi) o.Add((w[i] & ~3u, (w[i] & ~3u) + 4));
+                if ((w[i] & 0xFC1FFFFF) != 0x3C008000) continue;            // lis rX, 0x8000
+                uint rx = (w[i] >> 21) & 31;
+                for (int k = i + 1; k < Math.Min(w.Count, i + 24); k++)
+                {
+                    uint op = w[k] >> 26, rs = (w[k] >> 21) & 31, ra = (w[k] >> 16) & 31, d = w[k] & 0xFFFF;
+                    bool uses = op >= 32 && op <= 47 ? ra == rx : op == 14 ? ra == rx : op == 24 ? rs == rx : false;
+                    if (!uses || d >= 0x8000) continue;
+                    uint a = 0x80000000 | d;
+                    if (a >= lo && a < hi) o.Add((a, a + (op == 46 || op == 47 ? 0x80u : 0x20u)));
+                }
+            }
             return o;
         }
 

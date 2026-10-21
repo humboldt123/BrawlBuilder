@@ -745,6 +745,7 @@ namespace BrawlBuilder
 				{
 					Log = s => SetStatus(s.Length > 40 ? s.Substring(0, 40) + "..." : s),
 					RemoveSubspace = removeSubspace.Checked,
+					ConfirmFit = msg => (bool)Invoke(new Func<bool>(() => MessageBox.Show(this, msg, "BrawlBuilderEX", MessageBoxButtons.YesNo, MessageBoxIcon.Warning) == DialogResult.Yes)),
 					SubspaceList = _basePath + @"\Resources\SubspaceEmissaryFiles.txt"
 				};
 				b.Run("ssbb.d", m, customID.Checked ? gameID.Text : null);
