@@ -75,7 +75,8 @@ namespace BrawlBuilder.EX
             // the SD folder becomes pack files (SdPack), so the FST stays about vanilla-sized. Their hash table (4 bytes a file) and the EX RAM
             // go at the top of the MEM2 arena, leaving MEM1 exactly vanilla. Only if the FST still outgrows the vanilla one (which would push
             // the arena top below a heap the mod hard-codes there) do they go under the FST in MEM1 instead, with that heap and every pointer
-            // to it moved down by whole 64 KiB steps (that path is fragile: a mod's own data can hold pointers we cannot see).
+            // to it moved down by whole 64 KiB steps (that path is fragile: a mod's own data can hold pointers we cannot see - with the
+            // BrawlEx heap moved, P+Ex crashed creating the Ice Climbers' fighter instance mid-match; the MEM2 layout does not).
             string rootDir = Path.Combine(files, m.Root);
             var (nFiles, packNames) = SdPack.Layout(files, m.Root);
             uint fstAfter = FstSize(files, rootDir) + (uint)packNames.Sum(x => 12 + x.Length + 1);

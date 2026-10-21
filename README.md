@@ -1,10 +1,11 @@
-# BrawlBuilderEx
+<p align="center"><img src="logo.png" alt="BrawlBuilderEx"></p>
+
 The Ultimate Super Smash Bros Brawl ISO Builder
 
 ## About
 This is a tool to build modded SSBB ISOs. It currently works with many Brawl mods, although there are some issues. All versions of Project M should run fine, including 3.6 and above, with full support for sfx .sawnd files and alternate stages. Most Project M mods should work as well. Psycho Ghost's 3.6 build has been tested and seems to work fine. Legacy M, however, does not work at this time (with a regular build; Legacy MX works as an EX build).
 
-BrawlBuilderEx is a fork of [mogzol/BrawlBuilder](https://github.com/mogzol/BrawlBuilder) that adds EX builds: launcher-based mods (the Project+ family: Project+, P+Ex / PMEX Remix, Legacy MX, Brawl Minus, Brawl Void, ...) become a self-contained disc image with no SD card, no launcher app and no cheat file. Pick the mod's download folder (or its SD folder, its `pf` folder, or a folder with an `sd.raw`) as the mod folder, and BrawlBuilderEx detects the launcher-based mod and offers the EX build. Everything else (ISO/WBFS input, custom ID and title, banner, removing Subspace) works as before. Nothing in EX is specific to one mod; see [How EX works](#how-ex-works) below and [`EX-TESTS.md`](EX-TESTS.md) for what has been tested.
+BrawlBuilderEx is a fork of [mogzol/BrawlBuilder](https://github.com/mogzol/BrawlBuilder) that adds EX builds: launcher-based mods (the Project+ family: Project+, P+Ex / PMEX Remix, Legacy MX, Brawl Minus, Brawl Void, ...) become a self-contained disc image with no SD card, no launcher app and no cheat file. Pick the mod's download folder (or its SD folder, its `pf` folder, or a folder with an `sd.raw`) as the mod folder, and BrawlBuilderEx detects the launcher-based mod and offers the EX build. Everything else (ISO/WBFS input, custom ID and title, banner, removing Subspace) works as before. Nothing in EX is specific to one mod; see [How EX works](#how-ex-works) below.
 
 Other Brawl mods may or may not work, they are widely untested. It seems like anything using BrawlEx, however, does not work at this time, so all Brawl- versions beyond 2.x.6 will not work. (EX builds do handle BrawlEx: P+Ex Remix, Legacy MX and Void are BrawlEx mods.)
 
