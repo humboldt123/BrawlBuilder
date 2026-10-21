@@ -28,6 +28,12 @@ namespace BrawlBuilder.EX
         public List<string> Report = new List<string>();
 
         public const long DiscMax = 8511160320L * 31 / 32 - 96L * 1024 * 1024;   // file data a dual-layer Wii disc holds (31 of every 32 KiB; the rest is hashes), minus headroom
+        public bool KeepShadowed;                                         // diagnosis: keep vanilla files the mod replaces
+        public bool FreeDiscSpace = true;                                 // empty shadowed vanilla files / fit the disc (off: diagnosis, folder boot)
+        public bool Mem2Index;                                            // diagnostic: put the SD index in MEM2
+        // the EX RAM block + hash table are placed at boot FstMargin below the FST; the arena/heap move is sized for an FST up to
+        // FstSlack bigger than this builder computes (Dolphin lays out folder-boot FSTs ~8 KiB bigger than wit images)
+        const uint Mem2Top = 0x935E0000, FstMargin = 0x100, FstSlack = 0x6000;                 // (+ the 8 KiB BI2 block under the FST)
         public bool Bake = true;                                          // install unconditional writes / C2 hooks into main.dol (off: all at runtime, for diagnosis)
         public bool RemoveSubspace;                                       // delete the Subspace Emissary files
         public bool Fit = true;                                           // shrink optional vanilla content until the image fits a dual-layer disc
@@ -49,7 +55,7 @@ namespace BrawlBuilder.EX
                 Directory.CreateDirectory(Path.GetDirectoryName(dst)); if (File.Exists(dst)) File.Delete(dst); File.Copy(src, dst);
             }
             Log(string.Format("SD folder /{0}: {1} files copied to the disc{2}", m.Root, sd.Count, skipped > 0 ? " (" + skipped + " non-ASCII names skipped)" : ""));
-            FreeSpace(tree, m, sd);
+            if (FreeDiscSpace) FreeSpace(tree, m, sd);
 
             // 2. code list
             var gct = GeckoList.Parse(File.ReadAllBytes(m.GctPath));
@@ -67,10 +73,16 @@ namespace BrawlBuilder.EX
             var (nFiles, packNames) = SdPack.Layout(files, m.Root);
             uint fstAfter = FstSize(files, rootDir) + (uint)packNames.Sum(x => 12 + x.Length + 1);
             uint dataSize = Shims.DataSize(packNames.Count);
-            uint fstStart = ArenaHi(fstAfter), dataAddr = (fstStart - SdPack.IndexLoad(nFiles) - dataSize) & ~0x1Fu, idxAddr = dataAddr + dataSize;
+            uint fstStart = ArenaHi(fstAfter), dataAddr = (fstStart - FstSlack - FstMargin - SdPack.IndexLoad(nFiles) - dataSize) & ~0x1Fu, idxAddr = dataAddr + dataSize;
             int n = !usesHeap || dataAddr >= GeckoList.VanArenaHi ? 0 : (int)((GeckoList.VanArenaHi - dataAddr + 0xFFFF) / 0x10000);
             int delta = -0x10000 * n; uint targetHi = usesHeap ? (uint)(GeckoList.VanArenaHi + delta) : dataAddr;
-            Log(string.Format("SD pack: {0} files in " + packNames.Count + " pack file(s), hash table 0x{1:X} bytes @0x{2:X8} (+ EX RAM @0x{5:X8}); arena top 0x{3:X8}{4}", nFiles, SdPack.IndexLoad(nFiles), idxAddr, targetHi,
+            if (Mem2Index)
+            {
+                // diagnostic: index + EX RAM at the top of the MEM2 arena, MEM1 and the hard-coded heaps exactly vanilla
+                Bin.Require(fstStart >= GeckoList.VanArenaHi, "--mem2-index needs an FST no bigger than vanilla");
+                dataAddr = (Mem2Top - SdPack.IndexLoad(nFiles) - dataSize) & ~0x1Fu; idxAddr = dataAddr + dataSize; delta = 0; targetHi = GeckoList.VanArenaHi; usesHeap = true;
+            }
+            Log(string.Format("SD pack: {0} files in " + packNames.Count + " pack file(s), hash table 0x{1:X} bytes (+ EX RAM) placed at boot below the FST (~0x{5:X8}); arena top 0x{3:X8}{4}", nFiles, SdPack.IndexLoad(nFiles), idxAddr, targetHi,
                 usesHeap ? string.Format(", BrawlX/Syringe heap moved by -0x{0:X}", -delta) : " (no hard-coded heap in this mod)", dataAddr));
             if (delta != 0)
                 foreach (var (src, disc) in sd.Where(x => System.Text.RegularExpressions.Regex.IsMatch(x.Disc, @"(?i)/system/common2(_en)?\.pac$")))
@@ -102,7 +114,7 @@ namespace BrawlBuilder.EX
                 if (notes.Count > 0) { Put(Path.Combine(files, disc.Replace('/', Path.DirectorySeparatorChar)), GeckoList.Build(parts)); Report.Add(disc + ": " + string.Join("; ", notes)); }
             }
             // every edit of the SD copy is done: pack it
-            var pk = SdPack.Write(files, m.Root); pk.IndexAddr = idxAddr; pk.Data = dataAddr;
+            var pk = SdPack.Write(files, m.Root);
             Bin.Require(ArenaHi(FstSize(files)) == fstStart, "FST size after packing differs from the estimate");
             var g = GeckoList.Build(codes);
             uint dataEnd = (strBase + (uint)strBlob.Count + 0x1F) & ~0x1Fu;
@@ -166,7 +178,7 @@ namespace BrawlBuilder.EX
             var protect = new List<(uint, uint)> { (clSec, dataEnd) }; protect.AddRange(blobs.Select(b => (b.Lo, b.Lo + (uint)b.B.Length)));
             // the EX helpers go in the low-memory space after the handler where no code of the mod writes (P+'s VBI hook switch uses
             // 0x80002778, others keep data there), else after the code list
-            uint shimLen = (uint)Shims.Build(0x80002000, protect.Concat(new[] { (0u, 0u) }), pk, targetHi).Code.Length;
+            uint shimLen = (uint)Shims.Build(0x80002000, protect.Concat(new[] { (0u, 0u) }), pk, usesHeap ? targetHi : 0, FstMargin, Mem2Index ? dataAddr : 0).Code.Length;
             var used = GeckoList.WritesIn(gct, LowLo, LowHi);
             foreach (var (src, _) in extraGcts) { var raw = File.ReadAllBytes(src); if (raw.Length >= 16 && Bin.Get32(raw, 0) == 0x00D0C0DE) used.AddRange(GeckoList.WritesIn(GeckoList.Parse(raw), LowLo, LowHi)); }
             uint shimBase = 0;
@@ -181,7 +193,7 @@ namespace BrawlBuilder.EX
                 shimBase = dataEnd; protect.Add((shimBase, (shimBase + shimLen + 0x1F) & ~0x1Fu));
                 Bin.Require(shimBase + shimLen <= m.CodeListEnd, "no room for the EX helpers (low memory is used by the mod's codes and the code list area is full)");
             }
-            var (shim, labels) = Shims.Build(shimBase, protect, pk, targetHi);
+            var (shim, labels) = Shims.Build(shimBase, protect, pk, usesHeap ? targetHi : 0, FstMargin, Mem2Index ? dataAddr : 0);
             Bin.Require(shim.Length <= shimLen, "EX helpers grew");
             var h = (byte[])m.Handler.Clone();
             Bin.Require(Bin.Get32(h, 0x104) == 0x3DE08000 && Bin.Get32(h, 0x108) == 0x61EF22A8, "unexpected handler template");
@@ -221,8 +233,10 @@ namespace BrawlBuilder.EX
                 if (!disc.StartsWith(pfPrefix, StringComparison.OrdinalIgnoreCase)) continue;
                 var rel = disc.Substring(pfPrefix.Length);
                 string hit = null;
+                // exact paths only: a mod's X.pac does not always replace the localized X_en.pac (P+Ex ships 64-byte common.pac stubs
+                // and the game still loads system/common_en.pac from the disc)
                 if (vanilla.ContainsKey(rel)) hit = vanilla[rel];
-                else { var ext = Path.GetExtension(rel); var en = rel.Substring(0, rel.Length - ext.Length) + "_en" + ext; if (vanilla.ContainsKey(en)) hit = vanilla[en]; }
+                if (hit != null && KeepShadowed) continue;
                 if (hit != null && new FileInfo(hit).Length > 0) { freed += new FileInfo(hit).Length; Put(hit, new byte[0]); }
             }
             foreach (var d in new[] { "dummy1.dat", "dummy2.dat", "border.dat" })

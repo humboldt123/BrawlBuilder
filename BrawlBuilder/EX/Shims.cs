@@ -30,7 +30,7 @@ namespace BrawlBuilder.EX
         public static uint DataSize(int packs) => (uint)(FIP + packs * 0x40 + NSlot * Slot);
 
         /// <summary>where the packs are, where their hash table goes, and the RAM block</summary>
-        public class PackInfo { public List<string> Paths; public uint Count, EntriesOff, IndexAddr, IndexLoad, Data; }
+        public class PackInfo { public List<string> Paths; public uint Count, EntriesOff, IndexLoad; }
 
         static void Prolog(Asm a, int n) { a.W(Ppc.Stwu(1, -0x40, 1)); a.W(Ppc.Mflr(0)); a.W(Ppc.Stw(0, 0x44, 1)); a.W(Ppc.Stmw(32 - n, 0x08, 1)); }
         static void Epilog(Asm a, int n) { a.W(Ppc.Lmw(32 - n, 0x08, 1)); a.W(Ppc.Lwz(0, 0x44, 1)); a.W(Ppc.Mtlr(0)); a.W(Ppc.Addi(1, 1, 0x40)); a.W(Ppc.Blr); }
@@ -48,18 +48,25 @@ namespace BrawlBuilder.EX
             a.W((pc, l) => Ppc.Lis(reg, (int)(((l[label] + add + 0x8000) >> 16) & 0xFFFF))); a.W((pc, l) => Ppc.Addi(reg, reg, (int)((l[label] + add) & 0xFFFF)));
         }
 
+        /// <summary>reg = RAM block + off (the block's address is decided at boot, below the real FST, and kept at label "ram")</summary>
+        static void LaD(Asm a, int reg, uint off)
+        {
+            a.W((pc, l) => Ppc.Lis(reg, (int)(((l["ram"] + 0x8000) >> 16) & 0xFFFF))); a.W((pc, l) => Ppc.Lwz(reg, (int)(short)(l["ram"] & 0xFFFF), reg));
+            if (off != 0) a.W(Ppc.Addi(reg, reg, (int)off));
+        }
+
         static void SdDisc(Asm a, PackInfo pk)
         {
-            uint D = pk.Data, BB = D + Shims.BB, MTX = D + Shims.MTX, INIT = D + Shims.INIT, FIP = D + Shims.FIP, T = FIP + 0x40u * (uint)pk.Paths.Count;
-            uint HASHES = pk.IndexAddr + 0x20;
+            uint BB = Shims.BB, MTX = Shims.MTX, INIT = Shims.INIT, FIP = Shims.FIP, T = FIP + 0x40u * (uint)pk.Paths.Count;
+            uint IDX = DataSize(pk.Paths.Count), HASHES = IDX + 0x20;
 
             // ex_init (mutex held): open the packs once and load the hash table from ex0.pak; r3 = 1 ok / 0 failed
             a.Label("ex_init"); Prolog(a, 1);
-            a.La(12, INIT); a.W(Ppc.Lwz(0, 0, 12)); a.W(Ppc.Cmpwi(0, 0)); a.Bc("ne", "in_ok");
-            for (int i = 0; i < pk.Paths.Count; i++) { LaL(a, 3, "paths", 0x10u * (uint)i); a.La(4, FIP + 0x40u * (uint)i); a.Bl(DvdOpen); a.W(Ppc.Cmpwi(3, 0)); a.Bc("eq", "in_fail"); }
-            a.La(3, FIP); a.La(4, pk.IndexAddr); a.La(5, pk.IndexLoad); a.W(Ppc.Li(6, 0)); a.W(Ppc.Li(7, 2)); a.Bl(DvdReadPrio);
+            LaD(a, 12, INIT); a.W(Ppc.Lwz(0, 0, 12)); a.W(Ppc.Cmpwi(0, 0)); a.Bc("ne", "in_ok");
+            for (int i = 0; i < pk.Paths.Count; i++) { LaL(a, 3, "paths", 0x10u * (uint)i); LaD(a, 4, FIP + 0x40u * (uint)i); a.Bl(DvdOpen); a.W(Ppc.Cmpwi(3, 0)); a.Bc("eq", "in_fail"); }
+            LaD(a, 3, FIP); LaD(a, 4, IDX); a.La(5, pk.IndexLoad); a.W(Ppc.Li(6, 0)); a.W(Ppc.Li(7, 2)); a.Bl(DvdReadPrio);
             a.W(Ppc.Cmpwi(3, 0)); a.Bc("lt", "in_fail");
-            a.La(12, INIT); a.W(Ppc.Li(0, 1)); a.W(Ppc.Stw(0, 0, 12));
+            LaD(a, 12, INIT); a.W(Ppc.Li(0, 1)); a.W(Ppc.Stw(0, 0, 12));
             a.Label("in_ok"); a.W(Ppc.Li(3, 1)); a.Br("in_ret");
             a.Label("in_fail"); a.W(Ppc.Li(3, 0));
             a.Label("in_ret"); Epilog(a, 1);
@@ -69,14 +76,22 @@ namespace BrawlBuilder.EX
             a.Label("ex_find"); Prolog(a, 8);
             a.W(Ppc.Mr(31, 3));
             a.Label("fd_sl"); a.W(Ppc.Lbz(0, 0, 31)); a.W(Ppc.Cmpwi(0, 0x2F)); a.Bc("ne", "fd_h"); a.W(Ppc.Addi(31, 31, 1)); a.Br("fd_sl");
-            a.Label("fd_h"); a.La(30, 0x811C9DC5); a.W(Ppc.Li(29, 5381)); a.La(28, 0x01000193); a.W(Ppc.Li(27, 33));
+            a.Label("fd_h"); a.La(30, 0x811C9DC5); a.W(Ppc.Li(29, 5381)); a.La(28, 0x01000193); a.W(Ppc.Li(27, 33)); a.W(Ppc.Li(9, 1));
             a.Label("fd_hl"); a.W(Ppc.Lbz(10, 0, 31)); a.W(Ppc.Cmpwi(10, 0)); a.Bc("eq", "fd_bs");
+            // normalize like DVDOpen: at a segment start skip extra '/' and "./" ("/P+Ex/././pf/..." in Legacy's codes)
+            a.W(Ppc.Cmpwi(9, 0)); a.Bc("eq", "fd_ch");
+            a.W(Ppc.Cmpwi(10, 0x2F)); a.Bc("eq", "fd_sk1");
+            a.W(Ppc.Cmpwi(10, 0x2E)); a.Bc("ne", "fd_ch"); a.W(Ppc.Lbz(0, 1, 31)); a.W(Ppc.Cmpwi(0, 0x2F)); a.Bc("ne", "fd_ch");
+            a.W(Ppc.Addi(31, 31, 1));
+            a.Label("fd_sk1"); a.W(Ppc.Addi(31, 31, 1)); a.Br("fd_hl");
+            a.Label("fd_ch"); a.W(Ppc.Li(9, 0)); a.W(Ppc.Cmpwi(10, 0x2F)); a.Bc("ne", "fd_cs"); a.W(Ppc.Li(9, 1));
+            a.Label("fd_cs");
             a.W(Ppc.Addi(12, 10, -0x41)); a.W(Ppc.Cmplwi(12, 25)); a.Bc("gt", "fd_lc"); a.W(Ppc.Addi(10, 10, 0x20));
             a.Label("fd_lc");
             a.W(Ppc.Xor(30, 30, 10)); a.W(Ppc.Mullw(30, 30, 28)); a.W(Ppc.Mullw(29, 29, 27)); a.W(Ppc.Xor(29, 29, 10));
             a.W(Ppc.Addi(31, 31, 1)); a.Br("fd_hl");
             // lower bound of h1 in the sorted table: r26 lo, r25 hi, r24 table
-            a.Label("fd_bs"); a.W(Ppc.Li(26, 0)); a.La(25, pk.Count); a.La(24, HASHES);
+            a.Label("fd_bs"); a.W(Ppc.Li(26, 0)); a.La(25, pk.Count); LaD(a, 24, HASHES);
             a.Label("fd_bl"); a.W(Ppc.Cmplw(26, 25)); a.Bc("ge", "fd_scan");
             a.W(Ppc.Add(12, 26, 25)); a.W(Ppc.Rlwinm(12, 12, 31, 1, 31)); a.W(Ppc.Rlwinm(11, 12, 2, 0, 29)); a.W(Ppc.Lwzx(0, 24, 11));
             a.W(Ppc.Cmplw(0, 30)); a.Bc("lt", "fd_up"); a.W(Ppc.Mr(25, 12)); a.Br("fd_bl");
@@ -85,28 +100,28 @@ namespace BrawlBuilder.EX
             a.Label("fd_scan"); a.La(9, pk.Count); a.W(Ppc.Cmplw(26, 9)); a.Bc("ge", "fd_no");
             a.W(Ppc.Rlwinm(11, 26, 2, 0, 29)); a.W(Ppc.Lwzx(0, 24, 11)); a.W(Ppc.Cmplw(0, 30)); a.Bc("ne", "fd_no");
             a.W(Ppc.Rlwinm(25, 26, 4, 0, 27)); a.La(9, pk.EntriesOff); a.W(Ppc.Add(25, 25, 9));      // r25 = record offset in the pack
-            a.La(3, FIP); a.La(4, BB); a.W(Ppc.Li(5, 0x20)); a.W(Ppc.Rlwinm(6, 25, 0, 0, 26)); a.W(Ppc.Li(7, 2)); a.Bl(DvdReadPrio);
+            LaD(a, 3, FIP); LaD(a, 4, BB); a.W(Ppc.Li(5, 0x20)); a.W(Ppc.Rlwinm(6, 25, 0, 0, 26)); a.W(Ppc.Li(7, 2)); a.Bl(DvdReadPrio);
             a.W(Ppc.Cmpwi(3, 0)); a.Bc("lt", "fd_no");
-            a.La(12, BB); a.W(Ppc.Rlwinm(0, 25, 0, 27, 31)); a.W(Ppc.Add(12, 12, 0));
+            LaD(a, 12, BB); a.W(Ppc.Rlwinm(0, 25, 0, 27, 31)); a.W(Ppc.Add(12, 12, 0));
             a.W(Ppc.Lwz(0, 8, 12)); a.W(Ppc.Cmplw(0, 29)); a.Bc("eq", "fd_hit");
             a.W(Ppc.Addi(26, 26, 1)); a.Br("fd_scan");
-            a.Label("fd_hit"); a.W(Ppc.Lwz(4, 0, 12)); a.W(Ppc.Lwz(5, 4, 12)); a.W(Ppc.Lwz(6, 12, 12)); a.W(Ppc.Rlwinm(6, 6, 6, 0, 25)); a.La(7, FIP); a.W(Ppc.Add(6, 6, 7)); a.W(Ppc.Li(3, 1)); a.Br("fd_ret");
+            a.Label("fd_hit"); a.W(Ppc.Lwz(4, 0, 12)); a.W(Ppc.Lwz(5, 4, 12)); a.W(Ppc.Lwz(6, 12, 12)); a.W(Ppc.Rlwinm(6, 6, 6, 0, 25)); LaD(a, 7, FIP); a.W(Ppc.Add(6, 6, 7)); a.W(Ppc.Li(3, 1)); a.Br("fd_ret");
             a.Label("fd_no"); a.W(Ppc.Li(3, 0));
             a.Label("fd_ret"); Epilog(a, 8);
 
             // FILE* fopen(path, mode)
             a.Label("fa_open"); Prolog(a, 5);
-            Strip(a, 31, 3, "op"); a.La(3, MTX); a.Bl(OsLockMutex);
+            Strip(a, 31, 3, "op"); LaD(a, 3, MTX); a.Bl(OsLockMutex);
             a.Bl("ex_init"); a.W(Ppc.Cmpwi(3, 0)); a.Bc("eq", "op_fail");
             a.W(Ppc.Mr(3, 31)); a.Bl("ex_find"); a.W(Ppc.Cmpwi(3, 0)); a.Bc("eq", "op_fail"); a.W(Ppc.Mr(29, 4)); a.W(Ppc.Mr(28, 5)); a.W(Ppc.Mr(27, 6));
-            a.La(30, T); a.W(Ppc.Li(0, NSlot)); a.W(Ppc.Mtctr(0));
+            LaD(a, 30, T); a.W(Ppc.Li(0, NSlot)); a.W(Ppc.Mtctr(0));
             a.Label("op_find"); a.W(Ppc.Lwz(0, Used, 30)); a.W(Ppc.Cmpwi(0, 0)); a.Bc("eq", "op_got"); a.W(Ppc.Addi(30, 30, Slot));
             a.Bdnz("op_find"); a.Br("op_fail");
             a.Label("op_got"); a.W(Ppc.Li(0, 1)); a.W(Ppc.Stw(0, Used, 30)); a.W(Ppc.Li(0, 0)); a.W(Ppc.Stw(0, Pos, 30));
             a.W(Ppc.Stw(29, Base, 30)); a.W(Ppc.Stw(28, Size, 30)); a.W(Ppc.Stw(27, Fip, 30)); a.W(Ppc.Addi(0, 30, Size - 0x264)); a.W(Ppc.Stw(0, Obj, 30));
             a.W(Ppc.Mr(31, 30)); a.Br("op_ret");
             a.Label("op_fail"); a.W(Ppc.Li(31, 0));
-            a.Label("op_ret"); a.La(3, MTX); a.Bl(OsUnlockMutex); a.W(Ppc.Mr(3, 31)); Epilog(a, 5);
+            a.Label("op_ret"); LaD(a, 3, MTX); a.Bl(OsUnlockMutex); a.W(Ppc.Mr(3, 31)); Epilog(a, 5);
             // int fclose(FILE*)
             a.Label("fa_close");
             a.W(Ppc.Cmpwi(3, 0)); a.Bc("eq", "cl_ret"); a.W(Ppc.Li(0, 0)); a.W(Ppc.Stw(0, Used, 3));
@@ -121,7 +136,7 @@ namespace BrawlBuilder.EX
             a.Label("fa_read"); Prolog(a, 11);
             a.W(Ppc.Mr(31, 6)); a.W(Ppc.Mr(30, 3)); a.W(Ppc.Mr(29, 4)); a.W(Ppc.Mullw(28, 4, 5)); a.W(Ppc.Li(27, 0));
             a.W(Ppc.Cmpwi(29, 0)); a.Bc("eq", "rd_zero");
-            a.La(3, MTX); a.Bl(OsLockMutex);
+            LaD(a, 3, MTX); a.Bl(OsLockMutex);
             a.W(Ppc.Lwz(22, Base, 31)); a.W(Ppc.Lwz(21, Fip, 31));
             a.W(Ppc.Lwz(26, Pos, 31)); a.W(Ppc.Lwz(0, Size, 31)); a.W(Ppc.Cmpwi(26, 0)); a.Bc("lt", "rd_done"); a.W(Ppc.Cmpw(26, 0)); a.Bc("ge", "rd_done");
             a.W(Ppc.Subf(0, 26, 0)); a.W(Ppc.Cmplw(28, 0)); a.Bc("le", "rd_loop"); a.W(Ppc.Mr(28, 0));
@@ -138,32 +153,46 @@ namespace BrawlBuilder.EX
             a.W(Ppc.Li(23, Bounce)); a.W(Ppc.Subf(23, 24, 23)); a.W(Ppc.Cmplw(23, 28)); a.Bc("le", "rd_c"); a.W(Ppc.Mr(23, 28));
             a.Label("rd_c");
             a.W(Ppc.Add(5, 24, 23)); a.W(Ppc.Addi(5, 5, 31)); a.W(Ppc.Rlwinm(5, 5, 0, 0, 26));
-            a.W(Ppc.Mr(3, 21)); a.La(4, BB); a.W(Ppc.Mr(6, 25)); a.W(Ppc.Li(7, 2)); a.Bl(DvdReadPrio);
+            a.W(Ppc.Mr(3, 21)); LaD(a, 4, BB); a.W(Ppc.Mr(6, 25)); a.W(Ppc.Li(7, 2)); a.Bl(DvdReadPrio);
             a.W(Ppc.Cmpwi(3, 0)); a.Bc("lt", "rd_done");
-            a.La(4, BB); a.W(Ppc.Add(4, 4, 24)); a.W(Ppc.Add(5, 30, 27)); a.W(Ppc.Mtctr(23));
+            LaD(a, 4, BB); a.W(Ppc.Add(4, 4, 24)); a.W(Ppc.Add(5, 30, 27)); a.W(Ppc.Mtctr(23));
             a.Label("rd_cp"); a.W(Ppc.Lbz(0, 0, 4)); a.W(Ppc.Stb(0, 0, 5)); a.W(Ppc.Addi(4, 4, 1)); a.W(Ppc.Addi(5, 5, 1)); a.Bdnz("rd_cp");
             a.W(Ppc.Add(26, 26, 23)); a.W(Ppc.Add(27, 27, 23)); a.W(Ppc.Subf(28, 23, 28)); a.Br("rd_loop");
-            a.Label("rd_done"); a.W(Ppc.Stw(26, Pos, 31)); a.La(3, MTX); a.Bl(OsUnlockMutex); a.W(Ppc.Divwu(3, 27, 29)); a.Br("rd_ret");
+            a.Label("rd_done"); a.W(Ppc.Stw(26, Pos, 31)); LaD(a, 3, MTX); a.Bl(OsUnlockMutex); a.W(Ppc.Divwu(3, 27, 29)); a.Br("rd_ret");
             a.Label("rd_zero"); a.W(Ppc.Li(3, 0));
             a.Label("rd_ret"); Epilog(a, 11);
             // int fstat(path, struct stat*): st[0] = size
             a.Label("fa_stat"); Prolog(a, 3);
-            a.W(Ppc.Mr(30, 4)); a.W(Ppc.Mr(29, 3)); a.La(3, MTX); a.Bl(OsLockMutex);
+            a.W(Ppc.Mr(30, 4)); a.W(Ppc.Mr(29, 3)); LaD(a, 3, MTX); a.Bl(OsLockMutex);
             a.W(Ppc.Li(31, -1)); a.Bl("ex_init"); a.W(Ppc.Cmpwi(3, 0)); a.Bc("eq", "st_ret");
             Strip(a, 3, 29, "st"); a.Bl("ex_find"); a.W(Ppc.Cmpwi(3, 0)); a.Bc("eq", "st_ret");
             a.W(Ppc.Stw(5, 0, 30)); a.W(Ppc.Li(31, 0));
-            a.Label("st_ret"); a.La(3, MTX); a.Bl(OsUnlockMutex); a.W(Ppc.Mr(3, 31)); Epilog(a, 3);
+            a.Label("st_ret"); LaD(a, 3, MTX); a.Bl(OsUnlockMutex); a.W(Ppc.Mr(3, 31)); Epilog(a, 3);
         }
 
-        static void BssClear(Asm a, uint arenaHi, uint data, uint dataSize)
+        static void BssClear(Asm a, uint arenaHi, uint below, uint dataSize, uint mem2Base)
         {
-            // runs from __init_data, before OSInit: set the MEM1 arena top OSInit will use (0x80003110, else BI2 0x80000034)
+            // runs from __init_data, before OSInit. The EX RAM block + hash table go <below> bytes under the FST the apploader actually
+            // placed (0x80000038) - or at mem2Base - and the MEM1 arena top OSInit uses (0x80003110, else BI2 0x80000034) is set to
+            // min(arenaHi, block) (arenaHi 0: the block itself)
             // bss_clear(r3 = start, r4 = 0, r5 = size): memset every gap of [start, start+size) not covered by the protect table
             a.Label("bss");
             a.W(Ppc.Stwu(1, -0x20, 1)); a.W(Ppc.Mflr(0)); a.W(Ppc.Stw(0, 0x24, 1)); a.W(Ppc.Stmw(27, 0x0C, 1));
             a.W(Ppc.Mr(31, 3)); a.W(Ppc.Add(30, 3, 5));
-            if (arenaHi != 0) { a.La(12, arenaHi); a.W(Ppc.Lis(11, 0x8000)); a.W(Ppc.Stw(12, 0x34, 11)); a.W(Ppc.Stw(12, 0x3110, 11)); }
-            if (dataSize != 0) { a.La(3, data); a.W(Ppc.Li(4, 0)); a.La(5, dataSize); a.Bl(Memset); }
+            a.W(Ppc.Lis(11, 0x8000));
+            if (mem2Base != 0) { a.La(12, mem2Base); a.W(Ppc.Stw(12, 0x3128, 11)); a.La(9, arenaHi); }
+            else
+            {
+                // below the FST (0x80000038) and the BI2 block the apploader leaves under it (0x800000F4)
+                a.W(Ppc.Lwz(12, 0x38, 11)); a.W(Ppc.Lwz(10, 0xF4, 11)); a.W(Ppc.Cmplw(10, 12)); a.Bc("ge", "bi2_ok");
+                a.W(Ppc.Rlwinm(0, 10, 4, 28, 31)); a.W(Ppc.Cmplwi(0, 8)); a.Bc("ne", "bi2_ok"); a.W(Ppc.Mr(12, 10));     // only a MEM1 address
+                a.Label("bi2_ok"); a.La(10, below); a.W(Ppc.Subf(12, 10, 12)); a.W(Ppc.Rlwinm(12, 12, 0, 0, 26));
+                a.W(Ppc.Mr(9, 12));
+                if (arenaHi != 0) { a.La(10, arenaHi); a.W(Ppc.Cmplw(10, 12)); a.Bc("ge", "ah_min"); a.W(Ppc.Mr(9, 10)); a.Label("ah_min"); }
+            }
+            a.W(Ppc.Stw(9, 0x34, 11)); a.W(Ppc.Stw(9, 0x3110, 11));
+            a.W((pc, l) => Ppc.Lis(10, (int)(((l["ram"] + 0x8000) >> 16) & 0xFFFF))); a.W((pc, l) => Ppc.Stw(12, (int)(short)(l["ram"] & 0xFFFF), 10));
+            a.W(Ppc.Mr(3, 12)); a.W(Ppc.Li(4, 0)); a.La(5, dataSize); a.Bl(Memset);
             a.W((pc, l) => Ppc.Lis(29, (int)(((l["table"] + 0x8000) >> 16) & 0xFFFF))); a.W((pc, l) => Ppc.Addi(29, 29, (int)(l["table"] & 0xFFFF)));
             a.Label("loop");
             a.W(Ppc.Lwz(28, 0, 29)); a.W(Ppc.Cmpwi(28, 0)); a.Bc("eq", "tail");
@@ -182,15 +211,18 @@ namespace BrawlBuilder.EX
             a.W(Ppc.Lmw(27, 0x0C, 1)); a.W(Ppc.Lwz(0, 0x24, 1)); a.W(Ppc.Mtlr(0)); a.W(Ppc.Addi(1, 1, 0x20)); a.W(Ppc.Blr);
         }
 
-        /// <summary>assemble at <paramref name="baseAddr"/>; returns the bytes and the label addresses (bss, fa_open, ...)</summary>
-        public static (byte[] Code, Dictionary<string, uint> Labels) Build(uint baseAddr, IEnumerable<(uint Lo, uint Hi)> protect, PackInfo pack, uint arenaHi)
+        /// <summary>assemble at <paramref name="baseAddr"/>. RAM block + hash table: <paramref name="fstMargin"/> below the FST (or at
+        /// <paramref name="mem2Base"/>); <paramref name="arenaHi"/>: fixed MEM1 arena top for mods with hard-coded heaps (0: none)</summary>
+        public static (byte[] Code, Dictionary<string, uint> Labels) Build(uint baseAddr, IEnumerable<(uint Lo, uint Hi)> protect, PackInfo pack, uint arenaHi, uint fstMargin, uint mem2Base = 0)
         {
             var a = new Asm(baseAddr);
-            BssClear(a, arenaHi, pack.Data, DataSize(pack.Paths.Count));
+            uint ds = DataSize(pack.Paths.Count);
+            BssClear(a, arenaHi, (fstMargin + ds + pack.IndexLoad + 0x1F) & ~0x1Fu, ds, mem2Base);
             SdDisc(a, pack);
             a.Label("table");
             foreach (var r in protect.OrderBy(r => r.Lo)) { a.W(r.Lo); a.W(r.Hi); }
             a.W(0); a.W(0);
+            a.Label("ram"); a.W(0);
             a.Label("paths");
             foreach (var p in pack.Paths)
             {
