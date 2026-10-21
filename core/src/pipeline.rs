@@ -260,8 +260,13 @@ impl<'u> Builder<'u> {
                 State::CopyModFiles => {
                     if self.o.ex {
                         outcome = self.run_ex()?;
-                    } else if !self.o.mod_folder.is_empty() {
-                        self.copy_mod_files()?;
+                    } else {
+                        if !self.o.mod_folder.is_empty() {
+                            self.copy_mod_files()?;
+                        }
+                        if self.o.remove_subspace {
+                            self.hide_sse_panel()?;
+                        }
                     }
                     self.state = State::CopyBanner;
                 }
@@ -526,6 +531,13 @@ impl<'u> Builder<'u> {
             return Err(StepErr::Cancel);
         }
 
+        self.check()
+    }
+
+    /// with Subspace deleted its Solo menu panel would hang the game: hide it like Brawl hides a locked All-Star (after the mod's files are
+    /// copied, so a mod's own menu module is left alone)
+    fn hide_sse_panel(&mut self) -> Step {
+        crate::ssemenu::hide_subspace_file(&self.files().join("module").join("sora_menu_main.rel"))?;
         self.check()
     }
 

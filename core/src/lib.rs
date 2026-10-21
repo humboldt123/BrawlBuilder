@@ -14,6 +14,7 @@ pub mod pipeline;
 pub mod ppc;
 pub mod sdpack;
 pub mod shims;
+pub mod ssemenu;
 pub mod thp;
 pub mod wit;
 

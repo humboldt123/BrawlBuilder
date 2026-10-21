@@ -489,6 +489,7 @@ impl<'a> ExBuild<'a> {
                 .collect(),
             _ => Vec::new(),
         };
+        let sse_found = !sse.is_empty();
         let remove_sse = |sse: &mut Vec<PathBuf>, report: &mut Vec<String>| -> Result<()> {
             for f in sse.iter() {
                 fs::remove_file(f)?;
@@ -592,6 +593,20 @@ impl<'a> ExBuild<'a> {
                 }
                 self.report.push(format!("fit: {} trophy models replaced by one small model (every trophy in the Vault looks the same)", figs.len()));
                 self.removed.push(format!("{} trophy models (all trophies now show one small model)", figs.len()));
+            }
+        }
+        if (self.remove_subspace || sse_found) && sse.is_empty() {
+            // Subspace is gone: hide its Solo menu panel (selecting it would hang). The mod's copy is the one the game loads, if it has one.
+            let pf = if m.dir.join("pf").is_dir() { "pf/" } else { "" };
+            let mut menu = fsutil::join_disc(&files, &format!("{}/{pf}module/sora_menu_main.rel", m.root));
+            if !menu.is_file() {
+                menu = files.join("module").join("sora_menu_main.rel");
+            }
+            if crate::ssemenu::hide_subspace_file(&menu)? {
+                self.report.push(format!("Subspace Emissary hidden in the Solo menu ({})", fsutil::rel(&files, &menu)));
+            } else {
+                self.report.push("the Solo menu module is not the vanilla one: the Subspace Emissary button is still there".into());
+                self.removed.push("(the Subspace Emissary button is still in the Solo menu: this mod's menu is not the vanilla one, don't pick it)".into());
             }
         }
         (self.log)(&format!("disc space: {:.2} GB of unused vanilla data emptied, image {:.2} GB", freed as f64 / 1e9, total as f64 / 1e9));
